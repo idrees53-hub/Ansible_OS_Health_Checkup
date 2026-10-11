@@ -1,0 +1,391 @@
+---
+# ============================================================
+# STC RHEL OS HEALTH CHECK
+# MEMORY HEALTH COLLECTION
+#
+# Purpose:
+#   Collect memory and swap related information.
+#
+# This file ONLY collects data.
+# It does NOT determine OK/WARNING/CRITICAL.
+#
+# Main data sources:
+#   /proc/meminfo
+#   free
+#   swapon
+#   vmstat
+#   ps
+#   journalctl
+#   PSI (optional)
+# ============================================================
+
+
+# ============================================================
+# 1. MEMORY INFORMATION
+# ============================================================
+
+- name: Collect memory information
+  ansible.builtin.command:
+    cmd: free -m
+  register: hc_memory_free
+  changed_when: false
+  failed_when: false
+
+
+# ============================================================
+# 2. /proc/meminfo
+#
+# This is our primary source for detailed memory information.
+# ============================================================
+
+- name: Collect detailed memory information
+  ansible.builtin.command:
+    cmd: cat /proc/meminfo
+  register: hc_memory_meminfo
+  changed_when: false
+  failed_when: false
+
+
+# ============================================================
+# 3. SWAP INFORMATION
+# ============================================================
+
+- name: Collect swap information
+  ansible.builtin.command:
+    cmd: swapon --show
+  register: hc_memory_swap
+  changed_when: false
+  failed_when: false
+
+
+# ============================================================
+# 4. MEMORY ACTIVITY
+#
+# si = swap in
+# so = swap out
+#
+# We use vmstat to identify active swapping.
+# ============================================================
+
+- name: Collect memory activity
+  ansible.builtin.command:
+    cmd: vmstat 1 2
+  register: hc_memory_vmstat
+  changed_when: false
+  failed_when: false
+
+
+# ============================================================
+# 5. TOP MEMORY CONSUMING PROCESSES
+#
+# shell is intentionally used here because:
+#
+#   ps | sort | head
+#
+# requires shell pipeline processing.
+#
+# The command is read-only.
+# ============================================================
+
+- name: Collect top memory consuming processes
+  ansible.builtin.shell:
+    cmd: >
+      ps -eo pid,user,pmem,pcpu,rss,vsz,comm
+      --sort=-pmem | head -n 11
+  register: hc_memory_top_processes
+  changed_when: false
+  failed_when: false
+
+
+# ============================================================
+# 6. OOM / OUT-OF-MEMORY CHECK
+#
+# We check the current boot kernel journal for:
+#
+#   Out of memory
+#   OOM
+#   Killed process
+#
+# grep returning RC=1 means "no match found".
+# Therefore it must NOT fail the playbook.
+# ============================================================
+
+- name: Check kernel journal for OOM events
+  ansible.builtin.shell:
+    cmd: >
+      journalctl -k -b --no-pager
+      | grep -Ei 'out of memory|oom|killed process'
+  register: hc_memory_oom
+  changed_when: false
+  failed_when: false
+
+
+# ============================================================
+# 7. MEMORY PRESSURE / PSI
+#
+# PSI may not be available on every server.
+# Therefore this is optional.
+# ============================================================
+
+- name: Check memory PSI availability
+  ansible.builtin.shell:
+    cmd: |
+      if [ -f /proc/pressure/memory ]; then
+        cat /proc/pressure/memory
+      else
+        echo "NOT_AVAILABLE"
+      fi
+  register: hc_memory_psi
+  changed_when: false
+  failed_when: false
+
+
+# ============================================================
+# 8. PARSE /proc/meminfo
+#
+# Convert important values from kB to MB.
+# ============================================================
+
+- name: Extract memory values
+  ansible.builtin.set_fact:
+
+    hc_memory_total_mb: >-
+      {{
+        (
+          hc_memory_meminfo.stdout
+          | regex_search('MemTotal:\s+([0-9]+)', '\1')
+          | first
+          | int
+          / 1024
+        )
+        | round(0)
+        | int
+      }}
+
+    hc_memory_free_mb: >-
+      {{
+        (
+          hc_memory_meminfo.stdout
+          | regex_search('MemFree:\s+([0-9]+)', '\1')
+          | first
+          | int
+          / 1024
+        )
+        | round(0)
+        | int
+      }}
+
+    hc_memory_available_mb: >-
+      {{
+        (
+          hc_memory_meminfo.stdout
+          | regex_search('MemAvailable:\s+([0-9]+)', '\1')
+          | first
+          | int
+          / 1024
+        )
+        | round(0)
+        | int
+      }}
+
+    hc_memory_buffers_mb: >-
+      {{
+        (
+          hc_memory_meminfo.stdout
+          | regex_search('Buffers:\s+([0-9]+)', '\1')
+          | first
+          | int
+          / 1024
+        )
+        | round(0)
+        | int
+      }}
+
+    hc_memory_cached_mb: >-
+      {{
+        (
+          hc_memory_meminfo.stdout
+          | regex_search('Cached:\s+([0-9]+)', '\1')
+          | first
+          | int
+          / 1024
+        )
+        | round(0)
+        | int
+      }}
+
+    hc_memory_swap_total_mb: >-
+      {{
+        (
+          hc_memory_meminfo.stdout
+          | regex_search('SwapTotal:\s+([0-9]+)', '\1')
+          | first
+          | int
+          / 1024
+        )
+        | round(0)
+        | int
+      }}
+
+    hc_memory_swap_free_mb: >-
+      {{
+        (
+          hc_memory_meminfo.stdout
+          | regex_search('SwapFree:\s+([0-9]+)', '\1')
+          | first
+          | int
+          / 1024
+        )
+        | round(0)
+        | int
+      }}
+
+
+# ============================================================
+# 9. CALCULATE DERIVED MEMORY VALUES
+# ============================================================
+
+- name: Calculate memory usage
+  ansible.builtin.set_fact:
+
+    hc_memory_used_mb: >-
+      {{
+        (hc_memory_total_mb | int)
+        -
+        (hc_memory_available_mb | int)
+      }}
+
+    hc_memory_utilization_percent: >-
+      {{
+        (
+          (
+            (hc_memory_total_mb | float)
+            -
+            (hc_memory_available_mb | float)
+          )
+          /
+          (hc_memory_total_mb | float)
+          * 100
+        )
+        | round(2)
+      }}
+
+    hc_memory_swap_used_mb: >-
+      {{
+        (hc_memory_swap_total_mb | int)
+        -
+        (hc_memory_swap_free_mb | int)
+      }}
+
+# ============================================================
+# 10. CALCULATE SWAP UTILIZATION
+# ============================================================
+
+- name: Calculate swap utilization
+  ansible.builtin.set_fact:
+
+    hc_memory_swap_utilization_percent: >-
+      {{
+        (
+          (
+            (hc_memory_swap_total_mb | float)
+            -
+            (hc_memory_swap_free_mb | float)
+          )
+          /
+          (hc_memory_swap_total_mb | float)
+          * 100
+        )
+        | round(2)
+        if (hc_memory_swap_total_mb | float) > 0
+        else 0
+      }}
+
+# ============================================================
+# 11. DETERMINE OOM STATUS
+#
+# Important:
+#
+# No matching OOM message = detected=false
+# Matching message    = detected=true
+# ============================================================
+
+- name: Determine OOM status
+  ansible.builtin.set_fact:
+
+    hc_memory_oom_detected: >-
+      {{
+        hc_memory_oom.stdout | trim | length > 0
+      }}
+
+
+# ============================================================
+# 12. DETERMINE PSI STATUS
+# ============================================================
+
+- name: Determine PSI availability
+  ansible.builtin.set_fact:
+
+    hc_memory_psi_available: >-
+      {{
+        hc_memory_psi.stdout | trim != 'NOT_AVAILABLE'
+      }}
+
+
+# ============================================================
+# 13. BUILD STRUCTURED MEMORY DATASET
+#
+# This becomes the raw memory dataset that the assessment
+# engine will consume.
+# ============================================================
+
+- name: Build memory health dataset
+  ansible.builtin.set_fact:
+
+    hc_memory_data:
+
+      total_mb: "{{ hc_memory_total_mb }}"
+
+      available_mb: "{{ hc_memory_available_mb }}"
+
+      free_mb: "{{ hc_memory_free_mb }}"
+
+      used_mb: "{{ hc_memory_used_mb }}"
+
+      utilization_percent: "{{ hc_memory_utilization_percent }}"
+
+      buffers_mb: "{{ hc_memory_buffers_mb }}"
+
+      cached_mb: "{{ hc_memory_cached_mb }}"
+
+      swap:
+        total_mb: "{{ hc_memory_swap_total_mb }}"
+        free_mb: "{{ hc_memory_swap_free_mb }}"
+        used_mb: "{{ hc_memory_swap_used_mb }}"
+        utilization_percent: "{{ hc_memory_swap_utilization_percent }}"
+
+      swap_activity:
+        raw: "{{ hc_memory_vmstat.stdout_lines }}"
+
+      top_processes:
+        raw: "{{ hc_memory_top_processes.stdout_lines }}"
+
+      oom:
+        detected: "{{ hc_memory_oom_detected }}"
+        evidence: "{{ hc_memory_oom.stdout_lines }}"
+
+      psi:
+        available: "{{ hc_memory_psi_available }}"
+        raw: "{{ hc_memory_psi.stdout_lines }}"
+
+
+# ============================================================
+# 14. DISPLAY MEMORY DATASET
+#
+# Useful during development/testing.
+# We can reduce this later for production execution.
+# ============================================================
+
+- name: Display collected memory health data
+  ansible.builtin.debug:
+    var: hc_memory_data

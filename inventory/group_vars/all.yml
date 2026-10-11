@@ -1,0 +1,73 @@
+---
+health_check:
+  log_lookback_days: 7
+
+  filesystem:
+    warning_percent: 80
+    critical_percent: 90
+
+    excluded_filesystems:
+      - iso9660
+
+    excluded_mountpoints:
+      - /dev
+      - /dev/shm
+      - /run
+      - /run/user/0
+      - /run/user/1000
+
+  journal:
+    analyze_errors: true
+    analyze_warnings: true
+
+  kernel:
+    analyze_errors: true
+    analyze_warnings: true
+
+  services:
+    check_failed_services: true
+
+  cpu:
+    utilization:
+      warning_percent: 80
+      critical_percent: 90
+
+    load:
+      warning_ratio: 0.80
+      critical_ratio: 1.00
+
+    steal:
+      warning_percent: 10
+      critical_percent: 20
+
+    iowait:
+      warning_percent: 20
+      critical_percent: 40
+
+    sampling:
+      interval_seconds: 2
+
+    top_processes: 5
+
+  memory:
+    utilization:
+      warning_percent: 80
+      critical_percent: 90
+
+    swap:
+      warning_percent: 20
+      critical_percent: 50
+
+    swap_activity:
+      warning_threshold: 1
+      critical_threshold: 10
+
+    oom:
+      critical: true
+
+
+server_profile:
+  role: application
+  environment: production
+  virtualization: vmware
+  gui_enabled: false

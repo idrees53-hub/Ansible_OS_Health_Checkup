@@ -1,0 +1,552 @@
+---
+# ============================================================
+# STC RHEL OS HEALTH CHECK
+# CPU DATA COLLECTION
+#
+# Purpose:
+#   Collect CPU topology, load, utilization, I/O wait,
+#   steal time, CPU frequency information, and top CPU
+#   consuming processes.
+#
+# Design:
+#   - RHEL 8 / RHEL 9 compatible
+#   - Does not require sysstat/mpstat/sar
+#   - Uses portable /proc and sysfs interfaces
+#   - Optional tools are detected dynamically
+#   - Collection is separated from assessment
+# ============================================================
+
+
+# ============================================================
+# 1. CPU INVENTORY / TOPOLOGY
+# ============================================================
+
+- name: Collect CPU topology information
+  ansible.builtin.command:
+    cmd: lscpu -J
+  register: hc_lscpu
+  changed_when: false
+  failed_when: false
+
+
+- name: Parse lscpu JSON output
+  ansible.builtin.set_fact:
+    hc_lscpu_data: "{{ hc_lscpu.stdout | from_json }}"
+  when:
+    - hc_lscpu.rc == 0
+    - hc_lscpu.stdout | length > 0
+  failed_when: false
+
+
+- name: Initialize CPU inventory map
+  ansible.builtin.set_fact:
+    hc_cpu_inventory_map: {}
+
+
+- name: Build CPU inventory map
+  ansible.builtin.set_fact:
+    hc_cpu_inventory_map: >-
+      {{
+        hc_cpu_inventory_map |
+        combine(
+          {
+            (item.field | regex_replace(':$', '')): item.data
+          }
+        )
+      }}
+  loop: "{{ hc_lscpu_data.lscpu | default([]) }}"
+  when:
+    - hc_lscpu_data is defined
+
+
+- name: Create normalized CPU inventory
+  ansible.builtin.set_fact:
+    hc_cpu_inventory:
+      architecture: "{{ hc_cpu_inventory_map['Architecture'] | default('NOT_AVAILABLE') }}"
+      vendor: "{{ hc_cpu_inventory_map['Vendor ID'] | default('NOT_AVAILABLE') }}"
+      model: "{{ hc_cpu_inventory_map['Model name'] | default('NOT_AVAILABLE') }}"
+      logical_cpus: "{{ hc_cpu_inventory_map['CPU(s)'] | default('NOT_AVAILABLE') }}"
+      online_cpus: "{{ hc_cpu_inventory_map['On-line CPU(s) list'] | default('NOT_AVAILABLE') }}"
+      threads_per_core: "{{ hc_cpu_inventory_map['Thread(s) per core'] | default('NOT_AVAILABLE') }}"
+      cores_per_socket: "{{ hc_cpu_inventory_map['Core(s) per socket'] | default('NOT_AVAILABLE') }}"
+      sockets: "{{ hc_cpu_inventory_map['Socket(s)'] | default('NOT_AVAILABLE') }}"
+      numa_nodes: "{{ hc_cpu_inventory_map['NUMA node(s)'] | default('NOT_AVAILABLE') }}"
+      hypervisor: "{{ hc_cpu_inventory_map['Hypervisor vendor'] | default('NOT_AVAILABLE') }}"
+      virtualization: "{{ hc_cpu_inventory_map['Virtualization type'] | default('NOT_AVAILABLE') }}"
+
+
+# ============================================================
+# 2. ONLINE CPU INFORMATION
+# ============================================================
+
+- name: Collect online CPU list
+  ansible.builtin.command:
+    cmd: cat /sys/devices/system/cpu/online
+  register: hc_cpu_online
+  changed_when: false
+  failed_when: false
+
+
+- name: Add online CPU information to inventory
+  ansible.builtin.set_fact:
+    hc_cpu_inventory: >-
+      {{
+        hc_cpu_inventory |
+        combine(
+          {
+            'online_cpu_list':
+              hc_cpu_online.stdout | default('NOT_AVAILABLE')
+          }
+        )
+      }}
+
+
+# ============================================================
+# 3. CPU LOAD AVERAGE
+# ============================================================
+
+- name: Collect CPU load average
+  ansible.builtin.command:
+    cmd: cat /proc/loadavg
+  register: hc_cpu_loadavg
+  changed_when: false
+  failed_when: false
+
+
+- name: Initialize CPU load data
+  ansible.builtin.set_fact:
+    hc_cpu_load:
+      load_1m: "NOT_AVAILABLE"
+      load_5m: "NOT_AVAILABLE"
+      load_15m: "NOT_AVAILABLE"
+
+
+- name: Parse CPU load average
+  ansible.builtin.set_fact:
+    hc_cpu_load:
+      load_1m: "{{ hc_cpu_loadavg.stdout.split()[0] }}"
+      load_5m: "{{ hc_cpu_loadavg.stdout.split()[1] }}"
+      load_15m: "{{ hc_cpu_loadavg.stdout.split()[2] }}"
+  when:
+    - hc_cpu_loadavg.rc == 0
+    - hc_cpu_loadavg.stdout.split() | length >= 3
+
+
+# ============================================================
+# 4. /proc/stat CPU COUNTERS
+#
+# We take two samples separated by a configurable interval.
+#
+# This allows us to calculate actual CPU utilization rather
+# than relying on a single instantaneous snapshot.
+# ============================================================
+
+- name: Collect two CPU counter samples
+  ansible.builtin.shell:
+    cmd: |
+      awk '/^cpu / {print}' /proc/stat
+      sleep {{ health_check.cpu.sampling.interval_seconds | int }}
+      awk '/^cpu / {print}' /proc/stat
+  register: hc_cpu_stat_samples
+  changed_when: false
+  failed_when: false
+
+
+# ============================================================
+# 5. VALIDATE CPU COUNTER SAMPLES
+# ============================================================
+
+- name: Extract CPU counter lines
+  ansible.builtin.set_fact:
+    hc_cpu_stat_lines: >-
+      {{
+        hc_cpu_stat_samples.stdout_lines |
+        select('match', '^cpu ') |
+        list
+      }}
+
+
+- name: Initialize CPU counters
+  ansible.builtin.set_fact:
+    hc_cpu_stat_start: []
+    hc_cpu_stat_end: []
+
+
+- name: Parse first CPU counter sample
+  ansible.builtin.set_fact:
+    hc_cpu_stat_start: >-
+      {{
+        hc_cpu_stat_lines[0].split()[1:] |
+        map('int') |
+        list
+      }}
+  when:
+    - hc_cpu_stat_lines | length >= 2
+
+
+- name: Parse second CPU counter sample
+  ansible.builtin.set_fact:
+    hc_cpu_stat_end: >-
+      {{
+        hc_cpu_stat_lines[1].split()[1:] |
+        map('int') |
+        list
+      }}
+  when:
+    - hc_cpu_stat_lines | length >= 2
+
+# ============================================================
+# 6. CALCULATE CPU COUNTER DELTAS
+# ============================================================
+
+- name: Calculate CPU counter deltas
+  ansible.builtin.set_fact:
+    hc_cpu_deltas:
+      user: "{{ (hc_cpu_stat_end[0] | int) - (hc_cpu_stat_start[0] | int) }}"
+      nice: "{{ (hc_cpu_stat_end[1] | int) - (hc_cpu_stat_start[1] | int) }}"
+      system: "{{ (hc_cpu_stat_end[2] | int) - (hc_cpu_stat_start[2] | int) }}"
+      idle: "{{ (hc_cpu_stat_end[3] | int) - (hc_cpu_stat_start[3] | int) }}"
+      iowait: "{{ (hc_cpu_stat_end[4] | int) - (hc_cpu_stat_start[4] | int) }}"
+      irq: "{{ (hc_cpu_stat_end[5] | int) - (hc_cpu_stat_start[5] | int) }}"
+      softirq: "{{ (hc_cpu_stat_end[6] | int) - (hc_cpu_stat_start[6] | int) }}"
+      steal: "{{ (hc_cpu_stat_end[7] | int) - (hc_cpu_stat_start[7] | int) }}"
+      guest: "{{ (hc_cpu_stat_end[8] | int) - (hc_cpu_stat_start[8] | int) }}"
+      guest_nice: "{{ (hc_cpu_stat_end[9] | int) - (hc_cpu_stat_start[9] | int) }}"
+  when:
+    - hc_cpu_stat_start | length >= 8
+    - hc_cpu_stat_end | length >= 8
+
+
+# ============================================================
+# 7. CALCULATE TOTAL CPU TIME
+# ============================================================
+
+- name: Calculate total CPU time
+  ansible.builtin.set_fact:
+    hc_cpu_total: >-
+      {{
+        (
+          (hc_cpu_deltas.user | int) +
+          (hc_cpu_deltas.nice | int) +
+          (hc_cpu_deltas.system | int) +
+          (hc_cpu_deltas.idle | int) +
+          (hc_cpu_deltas.iowait | int) +
+          (hc_cpu_deltas.irq | int) +
+          (hc_cpu_deltas.softirq | int) +
+          (hc_cpu_deltas.steal | int)
+        ) | int
+      }}
+  when:
+    - hc_cpu_deltas is defined
+
+# ============================================================
+# 8. CALCULATE CPU PERCENTAGES
+# ============================================================
+
+- name: Initialize CPU metrics
+  ansible.builtin.set_fact:
+    hc_cpu_metrics:
+      user_percent: "NOT_AVAILABLE"
+      nice_percent: "NOT_AVAILABLE"
+      system_percent: "NOT_AVAILABLE"
+      idle_percent: "NOT_AVAILABLE"
+      iowait_percent: "NOT_AVAILABLE"
+      irq_percent: "NOT_AVAILABLE"
+      softirq_percent: "NOT_AVAILABLE"
+      steal_percent: "NOT_AVAILABLE"
+      utilization_percent: "NOT_AVAILABLE"
+
+
+- name: Calculate CPU percentages
+  ansible.builtin.set_fact:
+    hc_cpu_metrics:
+      user_percent: >-
+        {{
+          (
+            (hc_cpu_deltas.user | int) * 100 /
+            (hc_cpu_total | int)
+          ) | round(2)
+        }}
+
+      nice_percent: >-
+        {{
+          (
+            (hc_cpu_deltas.nice | int) * 100 /
+            (hc_cpu_total | int)
+          ) | round(2)
+        }}
+
+      system_percent: >-
+        {{
+          (
+            (hc_cpu_deltas.system | int) * 100 /
+            (hc_cpu_total | int)
+          ) | round(2)
+        }}
+
+      idle_percent: >-
+        {{
+          (
+            (hc_cpu_deltas.idle | int) * 100 /
+            (hc_cpu_total | int)
+          ) | round(2)
+        }}
+
+      iowait_percent: >-
+        {{
+          (
+            (hc_cpu_deltas.iowait | int) * 100 /
+            (hc_cpu_total | int)
+          ) | round(2)
+        }}
+
+      irq_percent: >-
+        {{
+          (
+            (hc_cpu_deltas.irq | int) * 100 /
+            (hc_cpu_total | int)
+          ) | round(2)
+        }}
+
+      softirq_percent: >-
+        {{
+          (
+            (hc_cpu_deltas.softirq | int) * 100 /
+            (hc_cpu_total | int)
+          ) | round(2)
+        }}
+
+      steal_percent: >-
+        {{
+          (
+            (hc_cpu_deltas.steal | int) * 100 /
+            (hc_cpu_total | int)
+          ) | round(2)
+        }}
+
+      utilization_percent: >-
+        {{
+          (
+            (
+              (hc_cpu_total | int) -
+              (hc_cpu_deltas.idle | int) -
+              (hc_cpu_deltas.iowait | int)
+            ) * 100 /
+            (hc_cpu_total | int)
+          ) | round(2)
+        }}
+
+  when:
+    - hc_cpu_deltas is defined
+    - hc_cpu_total is defined
+    - hc_cpu_total | int > 0
+
+
+
+
+
+
+
+# ============================================================
+# 9. ADD LOAD INFORMATION TO CPU METRICS
+# ============================================================
+
+- name: Add CPU load information
+  ansible.builtin.set_fact:
+    hc_cpu_metrics: >-
+      {{
+        hc_cpu_metrics |
+        combine(
+          {
+            'load_1m':
+              hc_cpu_load.load_1m | float,
+            'load_5m':
+              hc_cpu_load.load_5m | float,
+            'load_15m':
+              hc_cpu_load.load_15m | float
+          }
+        )
+      }}
+  when:
+    - hc_cpu_load.load_1m != 'NOT_AVAILABLE'
+    - hc_cpu_load.load_5m != 'NOT_AVAILABLE'
+    - hc_cpu_load.load_15m != 'NOT_AVAILABLE'
+
+
+# ============================================================
+# 10. NORMALIZED CPU LOAD
+#
+# Example:
+#
+#   1 CPU  + load 0.80 = 0.80 normalized
+#   16 CPU + load 0.80 = 0.05 normalized
+# ============================================================
+
+- name: Calculate normalized CPU load
+  ansible.builtin.set_fact:
+    hc_cpu_metrics: >-
+      {{
+        hc_cpu_metrics |
+        combine(
+          {
+            'normalized_load_1m':
+              (
+                hc_cpu_load.load_1m | float /
+                hc_cpu_inventory.logical_cpus | int
+              ) | round(2)
+          }
+        )
+      }}
+  when:
+    - hc_cpu_load.load_1m != 'NOT_AVAILABLE'
+    - hc_cpu_inventory.logical_cpus is defined
+    - hc_cpu_inventory.logical_cpus is match('^[0-9]+$')
+    - hc_cpu_inventory.logical_cpus | int > 0
+
+
+# ============================================================
+# 11. DETECT OPTIONAL CPU TOOLS
+# ============================================================
+
+- name: Detect optional CPU tools
+  ansible.builtin.shell:
+    cmd: |
+      for command in mpstat sar iostat turbostat numactl; do
+        if command -v "$command" >/dev/null 2>&1; then
+          echo "AVAILABLE:$command"
+        else
+          echo "NOT_AVAILABLE:$command"
+        fi
+      done
+  register: hc_cpu_optional_tools
+  changed_when: false
+  failed_when: false
+
+
+# ============================================================
+# 12. CPU FREQUENCY INFORMATION
+#
+# Frequency interfaces differ between systems.
+# We therefore discover availability instead of assuming
+# cpu0/cpufreq exists.
+# ============================================================
+
+- name: Check CPU frequency interface
+  ansible.builtin.shell:
+    cmd: |
+      if test -d /sys/devices/system/cpu/cpufreq; then
+        echo "AVAILABLE:/sys/devices/system/cpu/cpufreq"
+      elif test -d /sys/devices/system/cpu/cpu0/cpufreq; then
+        echo "AVAILABLE:/sys/devices/system/cpu/cpu0/cpufreq"
+      else
+        echo "NOT_AVAILABLE"
+      fi
+  register: hc_cpu_frequency_interface
+  changed_when: false
+  failed_when: false
+
+
+# ============================================================
+# 13. TURBOSTAT
+#
+# Optional. Only execute if turbostat exists.
+# We use a short measurement interval.
+# ============================================================
+
+- name: Check whether turbostat is available
+  ansible.builtin.command:
+    cmd: command -v turbostat
+  register: hc_turbostat_check
+  changed_when: false
+  failed_when: false
+
+
+- name: Collect turbostat CPU information
+  ansible.builtin.command:
+    cmd: turbostat --quiet --interval 1 --num_iterations 1
+  register: hc_turbostat
+  changed_when: false
+  failed_when: false
+  when:
+    - hc_turbostat_check.rc == 0
+
+
+# ============================================================
+# 14. TOP CPU-CONSUMING PROCESSES
+# ============================================================
+
+- name: Collect top CPU consuming processes
+  ansible.builtin.shell:
+    cmd: >
+      ps -eo pid,user,pcpu,pmem,comm
+      --sort=-pcpu |
+      head -n {{ (health_check.cpu.top_processes | int) + 1 }}
+  register: hc_cpu_processes
+  changed_when: false
+  failed_when: false
+
+
+# ============================================================
+# 15. PROCESS DATA NORMALIZATION
+# ============================================================
+
+- name: Initialize CPU process list
+  ansible.builtin.set_fact:
+    hc_cpu_process_list: []
+
+
+- name: Parse top CPU processes
+  ansible.builtin.set_fact:
+    hc_cpu_process_list: >-
+      {{
+        hc_cpu_process_list +
+        [
+          {
+            'pid': item.split()[0],
+            'user': item.split()[1],
+            'cpu_percent': item.split()[2] | float,
+            'memory_percent': item.split()[3] | float,
+            'command': item.split()[4]
+          }
+        ]
+      }}
+  loop: "{{ hc_cpu_processes.stdout_lines[1:] | default([]) }}"
+  when:
+    - item.split() | length >= 5
+
+
+# ============================================================
+# 16. FINAL CPU DATASET
+# ============================================================
+
+- name: Build final CPU dataset
+  ansible.builtin.set_fact:
+    hc_cpu_data:
+      inventory: "{{ hc_cpu_inventory }}"
+      load: "{{ hc_cpu_load }}"
+      metrics: "{{ hc_cpu_metrics }}"
+      top_processes: "{{ hc_cpu_process_list }}"
+      optional_tools: "{{ hc_cpu_optional_tools.stdout_lines | default([]) }}"
+      frequency_interface: "{{ hc_cpu_frequency_interface.stdout | default('NOT_AVAILABLE') }}"
+      turbostat_available: "{{ hc_turbostat_check.rc == 0 }}"
+
+
+# ============================================================
+# 17. DISPLAY CPU DATA FOR VALIDATION
+# ============================================================
+
+- name: Display CPU inventory
+  ansible.builtin.debug:
+    var: hc_cpu_inventory
+
+- name: Display CPU metrics
+  ansible.builtin.debug:
+    var: hc_cpu_metrics
+
+- name: Display top CPU processes
+  ansible.builtin.debug:
+    var: hc_cpu_process_list
+
+- name: Display final CPU dataset
+  ansible.builtin.debug:
+    var: hc_cpu_data

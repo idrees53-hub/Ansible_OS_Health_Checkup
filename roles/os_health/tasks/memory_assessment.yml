@@ -1,0 +1,358 @@
+---
+# ============================================================
+# STC RHEL OS HEALTH CHECK
+# MEMORY HEALTH ASSESSMENT
+#
+# Purpose:
+#   Analyze the memory dataset collected by memory.yml.
+#
+# Severity:
+#   CRITICAL
+#   WARNING
+#   INFO
+#   OK
+#
+# This file does NOT collect memory information.
+# It only evaluates hc_memory_data.
+# ============================================================
+
+
+# ============================================================
+# 1. INITIALIZE MEMORY FINDINGS
+# ============================================================
+
+- name: Initialize memory health findings
+  ansible.builtin.set_fact:
+    hc_memory_findings: []
+
+
+# ============================================================
+# 2. MEMORY UTILIZATION
+#
+# Example:
+#
+#   39.52%  -> OK
+#   82%     -> WARNING
+#   93%     -> CRITICAL
+# ============================================================
+
+- name: Assess memory utilization
+  ansible.builtin.set_fact:
+    hc_memory_findings: >-
+      {{
+        hc_memory_findings +
+        [
+          {
+            'category': 'memory',
+            'severity':
+              'CRITICAL'
+              if (hc_memory_data.utilization_percent | float)
+                 >= (health_check.memory.utilization.critical_percent | float)
+              else
+              'WARNING'
+              if (hc_memory_data.utilization_percent | float)
+                 >= (health_check.memory.utilization.warning_percent | float)
+              else
+              'OK',
+
+            'message':
+              'Memory utilization is '
+              ~ (hc_memory_data.utilization_percent | float | round(2) | string)
+              ~ '%.',
+
+            'evidence':
+              'Total memory: '
+              ~ (hc_memory_data.total_mb | int | string)
+              ~ ' MB; available memory: '
+              ~ (hc_memory_data.available_mb | int | string)
+              ~ ' MB; utilization: '
+              ~ (hc_memory_data.utilization_percent | float | round(2) | string)
+              ~ '%.',
+
+            'recommendation':
+              'Investigate memory-consuming processes and memory pressure. '
+              'Consider workload tuning or additional memory if high utilization persists.'
+          }
+        ]
+      }}
+
+
+# ============================================================
+# 3. SWAP UTILIZATION
+#
+# Swap itself is not automatically a problem.
+# High sustained swap usage can indicate memory pressure.
+# ============================================================
+
+- name: Assess swap utilization
+  ansible.builtin.set_fact:
+    hc_memory_findings: >-
+      {{
+        hc_memory_findings +
+        [
+          {
+            'category': 'memory',
+            'severity':
+              'CRITICAL'
+              if (hc_memory_data.swap.utilization_percent | float)
+                 >= (health_check.memory.swap.critical_percent | float)
+              else
+              'WARNING'
+              if (hc_memory_data.swap.utilization_percent | float)
+                 >= (health_check.memory.swap.warning_percent | float)
+              else
+              'OK',
+
+            'message':
+              'Swap utilization is '
+              ~ (hc_memory_data.swap.utilization_percent | float | round(2) | string)
+              ~ '%.',
+
+            'evidence':
+              'Swap total: '
+              ~ (hc_memory_data.swap.total_mb | int | string)
+              ~ ' MB; swap used: '
+              ~ (hc_memory_data.swap.used_mb | int | string)
+              ~ ' MB; swap utilization: '
+              ~ (hc_memory_data.swap.utilization_percent | float | round(2) | string)
+              ~ '%.',
+
+            'recommendation':
+              'Investigate memory pressure and identify processes consuming significant memory. '
+              'Review whether additional RAM or workload tuning is required.'
+          }
+        ]
+      }}
+
+
+# ============================================================
+# 4. SWAP ACTIVITY
+#
+# vmstat fields:
+#
+#   si = swap in
+#   so = swap out
+#
+# We use the latest sample.
+# ============================================================
+
+- name: Extract latest swap activity
+  ansible.builtin.set_fact:
+    hc_memory_swap_in: >-
+      {{
+        (
+          hc_memory_data.swap_activity.raw[-1].split()[6]
+          | int
+        )
+      }}
+
+    hc_memory_swap_out: >-
+      {{
+        (
+          hc_memory_data.swap_activity.raw[-1].split()[7]
+          | int
+        )
+      }}
+
+
+# ============================================================
+# 5. ASSESS SWAP ACTIVITY
+# ============================================================
+
+- name: Assess swap activity
+  ansible.builtin.set_fact:
+    hc_memory_findings: >-
+      {{
+        hc_memory_findings +
+        [
+          {
+            'category': 'memory',
+            'severity':
+              'CRITICAL'
+              if (
+                (hc_memory_swap_in | int)
+                >= (health_check.memory.swap_activity.critical_threshold | int)
+                or
+                (hc_memory_swap_out | int)
+                >= (health_check.memory.swap_activity.critical_threshold | int)
+              )
+              else
+              'WARNING'
+              if (
+                (hc_memory_swap_in | int)
+                >= (health_check.memory.swap_activity.warning_threshold | int)
+                or
+                (hc_memory_swap_out | int)
+                >= (health_check.memory.swap_activity.warning_threshold | int)
+              )
+              else
+              'OK',
+
+            'message':
+              'Current swap activity: '
+              ~ 'swap-in='
+              ~ (hc_memory_swap_in | int | string)
+              ~ ', swap-out='
+              ~ (hc_memory_swap_out | int | string)
+              ~ '.',
+
+            'evidence':
+              'vmstat latest sample: swap-in='
+              ~ (hc_memory_swap_in | int | string)
+              ~ ', swap-out='
+              ~ (hc_memory_swap_out | int | string)
+              ~ '.',
+
+            'recommendation':
+              'Investigate memory pressure and identify processes consuming memory '
+              'if sustained swap activity is observed.'
+          }
+        ]
+      }}
+
+
+# ============================================================
+# 6. OOM EVENTS
+#
+# An OOM event is much more serious than ordinary high memory
+# utilization because the kernel may have killed processes.
+# ============================================================
+
+- name: Assess OOM events
+  ansible.builtin.set_fact:
+    hc_memory_findings: >-
+      {{
+        hc_memory_findings +
+        [
+          {
+            'category': 'memory',
+            'severity': 'CRITICAL',
+            'message': 'Out-of-memory activity was detected in the current boot journal.',
+            'evidence': hc_memory_data.oom.evidence,
+            'recommendation':
+              'Investigate the OOM event using journalctl and identify the process '
+              'that was terminated. Review memory limits and workload consumption.'
+          }
+        ]
+      }}
+  when:
+    - health_check.memory.oom.critical | bool
+    - hc_memory_data.oom.detected | bool
+
+
+# ============================================================
+# 7. PSI INFORMATION
+#
+# PSI is optional.
+#
+# If unavailable:
+#   INFO is not generated.
+#
+# If available:
+#   We retain the data for future assessment rules.
+# ============================================================
+
+- name: Add memory PSI information
+  ansible.builtin.set_fact:
+    hc_memory_findings: >-
+      {{
+        hc_memory_findings +
+        [
+          {
+            'category': 'memory',
+            'severity': 'INFO',
+            'message': 'Memory Pressure Stall Information (PSI) is available.',
+            'evidence': hc_memory_data.psi.raw,
+            'recommendation':
+              'Use memory PSI metrics for deeper memory-pressure analysis.'
+          }
+        ]
+      }}
+  when:
+    - hc_memory_data.psi.available | bool
+
+
+# ============================================================
+# 8. DISPLAY MEMORY FINDINGS
+# ============================================================
+
+- name: Display memory health findings
+  ansible.builtin.debug:
+    var: hc_memory_findings
+
+
+# ============================================================
+# 9. MEMORY SUMMARY
+# ============================================================
+
+- name: Calculate memory health summary
+  ansible.builtin.set_fact:
+
+    hc_memory_critical_count: >-
+      {{
+       (
+         hc_memory_findings
+         | selectattr('severity', 'equalto', 'CRITICAL')
+         | list
+         | length
+       ) | int
+      }}
+    hc_memory_warning_count: >-
+      {{
+        hc_memory_findings
+        | selectattr('severity', 'equalto', 'WARNING')
+        | list
+        | length
+      }}
+
+    hc_memory_info_count: >-
+      {{
+        hc_memory_findings
+        | selectattr('severity', 'equalto', 'INFO')
+        | list
+        | length
+      }}
+
+    hc_memory_ok_count: >-
+      {{
+        hc_memory_findings
+        | selectattr('severity', 'equalto', 'OK')
+        | list
+        | length
+      }}
+
+
+# ============================================================
+# 10. DETERMINE MEMORY HEALTH
+# ============================================================
+
+- name: Determine memory health status
+  ansible.builtin.set_fact:
+    hc_memory_status: >-
+      {{
+        'CRITICAL'
+        if (hc_memory_critical_count | int) > 0
+        else
+        'WARNING'
+        if (hc_memory_warning_count | int) > 0
+        else
+        'OK'
+      }}
+
+
+# ============================================================
+# 11. DISPLAY MEMORY HEALTH
+# ============================================================
+
+- name: Display memory health summary
+  ansible.builtin.debug:
+    msg:
+      - "=================================================="
+      - "MEMORY HEALTH"
+      - "=================================================="
+      - "Memory Health: {{ hc_memory_status }}"
+      - "CRITICAL Findings: {{ hc_memory_critical_count }}"
+      - "WARNING Findings: {{ hc_memory_warning_count }}"
+      - "INFO Findings: {{ hc_memory_info_count }}"
+      - "OK Findings: {{ hc_memory_ok_count }}"
+      - "=================================================="

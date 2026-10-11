@@ -1,0 +1,283 @@
+---
+# ============================================================
+# STC RHEL OS HEALTH CHECK
+# CPU HEALTH ASSESSMENT
+#
+# Purpose:
+#   Evaluate collected CPU metrics and generate structured
+#   health findings.
+#
+# Severity:
+#   CRITICAL > WARNING > OK
+#
+# Important:
+#   Collection is performed by cpu.yml.
+#   This file only evaluates the collected data.
+# ============================================================
+
+
+# ============================================================
+# 1. INITIALIZE CPU ASSESSMENT
+# ============================================================
+
+- name: Initialize CPU findings
+  ansible.builtin.set_fact:
+    hc_cpu_findings: []
+
+
+- name: Initialize CPU health status
+  ansible.builtin.set_fact:
+    hc_cpu_status: OK
+
+
+# ============================================================
+# 2. CPU UTILIZATION
+# ============================================================
+
+- name: Assess CPU utilization
+  ansible.builtin.set_fact:
+    hc_cpu_findings: >-
+      {{
+        hc_cpu_findings +
+        [
+          {
+            'id': 'cpu_utilization',
+            'severity':
+              'CRITICAL'
+              if (hc_cpu_metrics.utilization_percent | float)
+                 >= (health_check.cpu.utilization.critical_percent | float)
+
+              else
+              'WARNING'
+              if (hc_cpu_metrics.utilization_percent | float)
+                 >= (health_check.cpu.utilization.warning_percent | float)
+
+              else
+              'OK',
+
+            'message':
+              'CPU utilization is '
+              ~ (hc_cpu_metrics.utilization_percent | float | round(2) | string)
+              ~ '%.',
+
+            'evidence':
+              'CPU utilization: '
+              ~ (hc_cpu_metrics.utilization_percent | float | round(2) | string)
+              ~ '%; idle: '
+              ~ (hc_cpu_metrics.idle_percent | float | round(2) | string)
+              ~ '%.',
+
+            'recommendation':
+              'Review CPU-consuming processes and application workload if elevated CPU utilization persists.'
+          }
+        ]
+      }}
+  when:
+    - hc_cpu_metrics is defined
+    - hc_cpu_metrics.utilization_percent is defined
+    - hc_cpu_metrics.utilization_percent != 'NOT_AVAILABLE'
+
+
+# ============================================================
+# 3. NORMALIZED CPU LOAD
+# ============================================================
+
+- name: Assess normalized CPU load
+  ansible.builtin.set_fact:
+    hc_cpu_findings: >-
+      {{
+        hc_cpu_findings +
+        [
+          {
+            'id': 'cpu_load',
+            'severity':
+              'CRITICAL'
+              if (hc_cpu_metrics.normalized_load_1m | float)
+                 >= (health_check.cpu.load.critical_ratio | float)
+
+              else
+              'WARNING'
+              if (hc_cpu_metrics.normalized_load_1m | float)
+                 >= (health_check.cpu.load.warning_ratio | float)
+
+              else
+              'OK',
+
+            'message':
+              'Normalized 1-minute CPU load is '
+              ~ (hc_cpu_metrics.normalized_load_1m | float | round(2) | string)
+              ~ '.',
+
+            'evidence':
+              '1-minute load: '
+              ~ (hc_cpu_metrics.load_1m | float | round(2) | string)
+              ~ '; logical CPUs: '
+              ~ (hc_cpu_inventory.logical_cpus | string)
+              ~ '; normalized load: '
+              ~ (hc_cpu_metrics.normalized_load_1m | float | round(2) | string)
+              ~ '.',
+
+            'recommendation':
+              'Review workload and top CPU-consuming processes if normalized CPU load remains elevated.'
+          }
+        ]
+      }}
+  when:
+    - hc_cpu_metrics is defined
+    - hc_cpu_metrics.normalized_load_1m is defined
+    - hc_cpu_metrics.normalized_load_1m != 'NOT_AVAILABLE'
+
+
+# ============================================================
+# 4. CPU STEAL TIME
+#
+# Particularly important for virtual machines.
+#
+# High steal means the guest wanted CPU time but the
+# hypervisor was unable to provide it immediately.
+# ============================================================
+
+- name: Assess CPU steal time
+  ansible.builtin.set_fact:
+    hc_cpu_findings: >-
+      {{
+        hc_cpu_findings +
+        [
+          {
+            'id': 'cpu_steal',
+            'severity':
+              'CRITICAL'
+              if (hc_cpu_metrics.steal_percent | float)
+                 >= (health_check.cpu.steal.critical_percent | float)
+
+              else
+              'WARNING'
+              if (hc_cpu_metrics.steal_percent | float)
+                 >= (health_check.cpu.steal.warning_percent | float)
+
+              else
+              'OK',
+
+            'message':
+              'CPU steal time is '
+              ~ (hc_cpu_metrics.steal_percent | float | round(2) | string)
+              ~ '%.',
+
+            'evidence':
+              'CPU steal: '
+              ~ (hc_cpu_metrics.steal_percent | float | round(2) | string)
+              ~ '%; hypervisor: '
+              ~ (hc_cpu_inventory.hypervisor | default('NOT_AVAILABLE') | string)
+              ~ '.',
+
+            'recommendation':
+              'For virtual machines, review hypervisor CPU contention and host-level CPU allocation if elevated steal time persists.'
+          }
+        ]
+      }}
+  when:
+    - hc_cpu_metrics is defined
+    - hc_cpu_metrics.steal_percent is defined
+    - hc_cpu_metrics.steal_percent != 'NOT_AVAILABLE'
+
+
+# ============================================================
+# 5. CPU I/O WAIT
+#
+# High I/O wait can indicate that processes are waiting for
+# storage or other I/O operations rather than actively using
+# CPU.
+# ============================================================
+
+- name: Assess CPU I/O wait
+  ansible.builtin.set_fact:
+    hc_cpu_findings: >-
+      {{
+        hc_cpu_findings +
+        [
+          {
+            'id': 'cpu_iowait',
+            'severity':
+              'CRITICAL'
+              if (hc_cpu_metrics.iowait_percent | float)
+                 >= (health_check.cpu.iowait.critical_percent | float)
+
+              else
+              'WARNING'
+              if (hc_cpu_metrics.iowait_percent | float)
+                 >= (health_check.cpu.iowait.warning_percent | float)
+
+              else
+              'OK',
+
+            'message':
+              'CPU I/O wait is '
+              ~ (hc_cpu_metrics.iowait_percent | float | round(2) | string)
+              ~ '%.',
+
+            'evidence':
+              'I/O wait: '
+              ~ (hc_cpu_metrics.iowait_percent | float | round(2) | string)
+              ~ '%.',
+
+            'recommendation':
+              'Review storage latency, disk activity, and I/O-intensive processes if elevated I/O wait persists.'
+          }
+        ]
+      }}
+  when:
+    - hc_cpu_metrics is defined
+    - hc_cpu_metrics.iowait_percent is defined
+    - hc_cpu_metrics.iowait_percent != 'NOT_AVAILABLE'
+
+
+# ============================================================
+# 6. DETERMINE OVERALL CPU HEALTH
+#
+# Priority:
+#
+#   CRITICAL
+#       ↓
+#   WARNING
+#       ↓
+#   OK
+# ============================================================
+
+- name: Determine overall CPU health
+  ansible.builtin.set_fact:
+    hc_cpu_status: >-
+      {{
+        'CRITICAL'
+        if (
+          hc_cpu_findings
+          | selectattr('severity', 'equalto', 'CRITICAL')
+          | list
+          | length
+        ) > 0
+
+        else
+        'WARNING'
+        if (
+          hc_cpu_findings
+          | selectattr('severity', 'equalto', 'WARNING')
+          | list
+          | length
+        ) > 0
+
+        else
+        'OK'
+      }}
+
+
+# ============================================================
+# 7. DISPLAY CPU FINDINGS
+# ============================================================
+
+- name: Display CPU findings
+  ansible.builtin.debug:
+    var: hc_cpu_findings
+
+
+- name: Display CPU health status
+  ansible.builtin.debug:
+    msg: "CPU Health: {{ hc_cpu_status }}"

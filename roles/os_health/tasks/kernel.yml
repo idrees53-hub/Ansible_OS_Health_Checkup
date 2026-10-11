@@ -1,0 +1,43 @@
+---
+ - name: Collect kernel version 
+   ansible.builtin.command:
+     cmd: uname -r 
+   register: hc_kernel_version 
+   changed_when: false
+   failed_when: false
+
+ - name: Collect kernel journal 
+   ansible.builtin.command: 
+    cmd: journalctl -k -b --no-pager 
+   register: hc_kernel_journal 
+   changed_when: false
+   failed_when: false
+
+ - name: Collect kernel warnings and errors 
+   ansible.builtin.command: 
+    cmd: journalctl -k -b -p warning..alert --no-pager 
+   register: hc_kernel_warnings 
+   changed_when: false
+   failed_when: false
+
+ - name: Collect dmesg warnings and errors
+   ansible.builtin.command: 
+    cmd: dmesg -T --level=emerg,alert,crit,err,warn
+   register: hc_dmesg_warnings
+   changed_when: false
+   failed_when: false
+
+ - name: Display kernel version 
+   ansible.builtin.debug:
+    msg: "kernel: {{ hc_kernel_version.stdout }}"
+
+ - name: Display kernel warnings 
+   ansible.builtin.debug:
+    var: hc_kernel_warnings.stdout_lines 
+
+ - name: Display dmesg warnings 
+   ansible.builtin.debug:
+    var: hc_dmesg_warnings.stdout_lines 
+
+
+

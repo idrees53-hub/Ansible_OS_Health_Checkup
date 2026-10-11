@@ -1,0 +1,185 @@
+---
+
+- name: Initialize kernel findings
+  ansible.builtin.set_fact:
+    hc_kernel_findings: []
+
+# ---------------------------------------------------------
+# W^X VIOLATION
+# ---------------------------------------------------------
+
+- name: Assess kernel W^X violation
+  ansible.builtin.set_fact:
+    hc_kernel_findings: >-
+      {{
+        hc_kernel_findings +
+        [
+          {
+            'id': 'kernel_wx_violation',
+            'severity': 'WARNING',
+            'message': 'Kernel reported a W^X memory protection violation.',
+            'evidence': 'CPA detected W^X violation',
+            'recommendation': 'Investigate the kernel boot messages and virtualization/firmware configuration. Do not treat this finding alone as evidence of a service outage.'
+          }
+        ]
+      }}
+  when: "'CPA detected W^X violation' in hc_kernel_warnings.stdout"
+
+# ---------------------------------------------------------
+# X.509 CERTIFICATE
+# ---------------------------------------------------------
+
+- name: Assess kernel X.509 certificate issue
+  ansible.builtin.set_fact:
+    hc_kernel_findings: >-
+      {{
+        hc_kernel_findings +
+        [
+          {
+            'id': 'kernel_x509_certificate',
+            'severity': 'WARNING',
+            'message': 'Kernel reported a problem loading an X.509 certificate.',
+            'evidence': 'Problem loading X.509 certificate',
+            'recommendation': 'Review kernel integrity and platform certificate configuration and determine whether the certificate is expected on this server.'
+          }
+        ]
+      }}
+  when: "'Problem loading X.509 certificate' in hc_kernel_warnings.stdout"
+
+# ---------------------------------------------------------
+# SMBUS
+# ---------------------------------------------------------
+
+- name: Assess SMBus warning
+  ansible.builtin.set_fact:
+    hc_kernel_findings: >-
+      {{
+        hc_kernel_findings +
+        [
+          {
+            'id': 'kernel_smbus',
+            'severity': 'WARNING',
+            'message': 'Kernel reported an uninitialized SMBus base address.',
+            'evidence': 'SMBus base address uninitialized',
+            'recommendation': 'Review the virtual hardware/BIOS configuration if this message is unexpected for the server platform.'
+          }
+        ]
+      }}
+  when: "'SMBus base address uninitialized' in hc_kernel_warnings.stdout"
+
+# ---------------------------------------------------------
+# IP_SET DRIVER
+# ---------------------------------------------------------
+
+- name: Assess unmaintained ip_set driver
+  ansible.builtin.set_fact:
+    hc_kernel_findings: >-
+      {{
+        hc_kernel_findings +
+        [
+          {
+            'id': 'kernel_unmaintained_driver',
+            'severity': 'WARNING',
+            'message': 'Kernel reported an unmaintained ip_set driver.',
+            'evidence': 'Unmaintained driver is detected: ip_set',
+            'recommendation': 'Determine which service or firewall configuration requires the module and verify compatibility with the current RHEL kernel.'
+          }
+        ]
+      }}
+  when: "'Unmaintained driver is detected: ip_set' in hc_kernel_warnings.stdout"
+
+# ---------------------------------------------------------
+# VMware GRAPHICS
+# ---------------------------------------------------------
+
+- name: Assess VMware vmwgfx warning
+  ansible.builtin.set_fact:
+    hc_kernel_findings: >-
+      {{
+        hc_kernel_findings +
+        [
+          {
+            'id': 'vmware_vmwgfx_memory',
+            'severity': 'WARNING',
+            'message': 'VMware vmwgfx reported guest graphics memory pressure.',
+            'evidence': 'vmwgfx: mob memory overflow',
+            'recommendation': 'Review VMware guest RAM and graphics configuration. If GUI/3D graphics are not required, consider whether the virtual graphics configuration can be simplified.'
+          }
+        ]
+      }}
+  when:
+    - "'vmwgfx' in hc_kernel_warnings.stdout"
+    - server_profile.virtualization | default('unknown') | lower == 'vmware'
+
+
+
+# ---------------------------------------------------------
+# DEVICE MAPPER DEPRECATION
+# ---------------------------------------------------------
+
+- name: Assess device-mapper deprecation
+  ansible.builtin.set_fact:
+    hc_kernel_findings: >-
+      {{
+        hc_kernel_findings +
+        [
+          {
+            'id': 'device_mapper_deprecated',
+            'severity': 'INFO',
+            'message': 'Kernel reported a deprecated device-mapper capability attribute.',
+            'evidence': 'capability attribute has been deprecated',
+            'recommendation': 'Track this message for future kernel or storage configuration changes.'
+          }
+        ]
+      }}
+  when: "'capability attribute has been deprecated' in hc_kernel_warnings.stdout"
+
+# ---------------------------------------------------------
+# CPUID PERFORMANCE EVENTS
+# ---------------------------------------------------------
+
+- name: Assess unavailable CPUID performance events
+  ansible.builtin.set_fact:
+    hc_kernel_findings: >-
+      {{
+        hc_kernel_findings +
+        [
+          {
+            'id': 'cpuid_perf_events',
+            'severity': 'INFO',
+            'message': 'Some CPU performance monitoring events are unavailable.',
+            'evidence': 'CPUID marked event unavailable',
+            'recommendation': 'No immediate action unless CPU performance monitoring or profiling requires these hardware events.'
+          }
+        ]
+      }}
+  when: "'CPUID marked event' in hc_kernel_warnings.stdout"
+
+# ---------------------------------------------------------
+# IMA
+# ---------------------------------------------------------
+
+- name: Assess IMA measurement message
+  ansible.builtin.set_fact:
+    hc_kernel_findings: >-
+      {{
+        hc_kernel_findings +
+        [
+          {
+            'id': 'ima_measurement',
+            'severity': 'INFO',
+            'message': 'Kernel reported an IMA measurement configuration message.',
+            'evidence': 'Duplicate IMA measurements will not be recorded',
+            'recommendation': 'Review IMA configuration if integrity measurement is required by the server security baseline.'
+          }
+        ]
+      }}
+  when: "'Duplicate IMA measurements will not be recorded' in hc_kernel_warnings.stdout"
+
+# ---------------------------------------------------------
+# DISPLAY RESULTS
+# ---------------------------------------------------------
+
+- name: Display kernel findings
+  ansible.builtin.debug:
+    var: hc_kernel_findings

@@ -1,0 +1,58 @@
+---
+ - name: Collect journal disk usage 
+   ansible.builtin.command: 
+    cmd: journalctl --disk-usage 
+   register: hc_jorunal_disk 
+   changed_when: false 
+   failed_when: false 
+
+ - name: Collect current boot errors 
+   ansible.builtin.command: 
+    cmd: journalctl -p err..alert  -b --no-pager 
+   register: hc_journal_errors
+   changed_when: false 
+   failed_when: false 
+
+ - name: Collect current boot warnings an errors
+   ansible.builtin.command: 
+    cmd: journalctl -p warning..alert -b --no-pager
+   register: hc_journal_warnings
+   changed_when: false
+   failed_when: false
+
+ - name: Collect current boot warnings an errors
+   ansible.builtin.command:
+    cmd: journalctl -k -b --no-pager
+   register: hc_kernel_journal
+   changed_when: false
+   failed_when: false
+
+ - name: Collect current boot warnings an errors
+   ansible.builtin.command:
+    cmd: journalctl -k -b -p warning..alert --no-pager
+   register: hc_kernel_warnings
+   changed_when: false
+   failed_when: false
+
+ - name: Collect recent messages logs 
+   ansible.builtin.command: 
+    cmd: tail -100 /var/log/messages
+   register: hc_messages
+   changed_when: false 
+   failed_when: false 
+
+ - name: Collect recent secure log 
+   ansible.builtin.command: 
+    cmd: tail -100 /var/log/secure
+   register: hc_secure 
+   changed_when: false
+   failed_when: false 
+
+ - name: Collect recent audit log 
+   ansible.builtin.command: 
+    cmd: tail -100 /var/log/audit/audit.log
+   changed_when: false 
+   failed_when: false 
+
+
+

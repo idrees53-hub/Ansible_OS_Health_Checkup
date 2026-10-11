@@ -1,0 +1,175 @@
+---
+# =========================================================
+# STC RHEL OS HEALTH CHECK
+# GENERAL HEALTH ASSESSMENT
+#
+# This file assesses:
+#   1. Systemd services
+#   2. Filesystem usage
+#
+# This file does NOT calculate the final overall health.
+# Final overall health is calculated by:
+#
+#   overall_assessment.yml
+#
+# Finding structure:
+#
+#   category
+#   severity
+#   message
+#   evidence
+#   recommendation
+#
+# Severity:
+#
+#   CRITICAL
+#   WARNING
+#   INFO
+#   OK
+# =========================================================
+
+
+# ---------------------------------------------------------
+# INITIALIZATION
+# ---------------------------------------------------------
+
+- name: Initialize general health findings
+  ansible.builtin.set_fact:
+    hc_findings: []
+
+- name: Initialize filesystem findings
+  ansible.builtin.set_fact:
+    hc_filesystem_findings: []
+
+
+# ---------------------------------------------------------
+# SERVICE ASSESSMENT
+# ---------------------------------------------------------
+
+- name: Assess failed systemd services
+  ansible.builtin.set_fact:
+    hc_findings: >-
+      {{
+        hc_findings +
+        [
+          {
+            'category': 'services',
+            'severity': 'CRITICAL',
+            'message': 'One or more systemd services are in a failed state.',
+            'evidence': hc_failed_services.stdout_lines,
+            'recommendation': 'Investigate the failed services using systemctl status and journalctl.'
+          }
+        ]
+      }}
+  when:
+    - health_check.services.check_failed_services | bool
+    - hc_failed_services.stdout_lines | length > 0
+
+
+- name: Display service assessment
+  ansible.builtin.debug:
+    msg: >-
+      {{
+        'CRITICAL - Failed services detected'
+        if hc_failed_services.stdout_lines | length > 0
+        else
+        'OK - No failed systemd services detected'
+      }}
+
+
+# ---------------------------------------------------------
+# FILESYSTEM ASSESSMENT
+# ---------------------------------------------------------
+
+- name: Assess filesystem usage
+  ansible.builtin.set_fact:
+    hc_filesystem_findings: >-
+      {{
+        hc_filesystem_findings +
+        [
+          {
+            'category': 'filesystem',
+            'severity': (
+              'CRITICAL'
+              if (item.split()[5] | regex_replace('%', '') | int) >= (health_check.filesystem.critical_percent | int)
+              else
+              'WARNING'
+              if (item.split()[5] | regex_replace('%', '') | int) >= (health_check.filesystem.warning_percent | int)
+              else
+              'OK'
+            ),
+            'filesystem': item.split()[0],
+            'fstype': item.split()[1],
+            'usage_percent': (item.split()[5] | regex_replace('%', '') | int),
+            'mountpoint': item.split()[6],
+            'message': (
+              'Filesystem '
+              ~ item.split()[6]
+              ~ ' usage is '
+              ~ (item.split()[5] | regex_replace('%', '') | int | string)
+              ~ '%.'
+            ),
+            'evidence': (
+              'Filesystem: '
+              ~ item.split()[0]
+              ~ '; mountpoint: '
+              ~ item.split()[6]
+              ~ '; filesystem type: '
+              ~ item.split()[1]
+              ~ '; usage: '
+              ~ (item.split()[5] | regex_replace('%', '') | int | string)
+              ~ '%.'
+            ),
+            'recommendation': (
+              'Investigate disk usage and remove unnecessary files, logs, or old data if filesystem usage remains high.'
+            )
+          }
+        ]
+      }}
+  loop: "{{ hc_filesystems.stdout_lines[1:] }}"
+  when:
+    - item.split() | length >= 7
+    - item.split()[1] not in health_check.filesystem.excluded_filesystems
+    - item.split()[6] not in health_check.filesystem.excluded_mountpoints
+
+
+# ---------------------------------------------------------
+# DISPLAY FILESYSTEM FINDINGS
+# ---------------------------------------------------------
+
+- name: Display filesystem assessment
+  ansible.builtin.debug:
+    var: hc_filesystem_findings
+
+
+# ---------------------------------------------------------
+# FILESYSTEM HEALTH STATUS
+# ---------------------------------------------------------
+
+- name: Determine filesystem health status
+  ansible.builtin.set_fact:
+    hc_filesystem_status: >-
+      {{
+        'CRITICAL'
+        if (
+          hc_filesystem_findings
+          | selectattr('severity', 'equalto', 'CRITICAL')
+          | list
+          | length
+        ) > 0
+        else
+        'WARNING'
+        if (
+          hc_filesystem_findings
+          | selectattr('severity', 'equalto', 'WARNING')
+          | list
+          | length
+        ) > 0
+        else
+        'OK'
+      }}
+
+
+- name: Display filesystem health status
+  ansible.builtin.debug:
+    msg: "Filesystem Health: {{ hc_filesystem_status }}"

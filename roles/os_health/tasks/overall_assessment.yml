@@ -1,0 +1,194 @@
+---
+# ============================================================
+# STC RHEL OS HEALTH CHECK
+# OVERALL HEALTH ASSESSMENT
+#
+# Purpose:
+#   Combine the results from all health-check domains and
+#   determine the final health status of the server.
+#
+# Severity hierarchy:
+#
+#   CRITICAL
+#      ↓
+#   WARNING
+#      ↓
+#   OK
+#
+# INFO findings do not affect overall health.
+# ============================================================
+
+
+# ------------------------------------------------------------
+# INITIALIZE MASTER FINDINGS
+# ------------------------------------------------------------
+
+- name: Initialize all health findings
+  ansible.builtin.set_fact:
+    hc_all_findings: []
+
+
+# ------------------------------------------------------------
+# ADD CPU FINDINGS
+# ------------------------------------------------------------
+
+- name: Add CPU findings
+  ansible.builtin.set_fact:
+    hc_all_findings: >-
+      {{
+        hc_all_findings +
+        (hc_cpu_findings | default([]))
+      }}
+
+# ------------------------------------------------------------
+# ADD MEMORY FINDINGS
+# ------------------------------------------------------------
+
+- name: Add memory findings
+  ansible.builtin.set_fact:
+    hc_all_findings: >-
+      {{
+        hc_all_findings +
+        (hc_memory_findings | default([]))
+      }}
+
+
+# ------------------------------------------------------------
+# ADD KERNEL FINDINGS
+# ------------------------------------------------------------
+
+- name: Add kernel findings
+  ansible.builtin.set_fact:
+    hc_all_findings: >-
+      {{
+        hc_all_findings +
+        (hc_kernel_findings | default([]))
+      }}
+
+
+# ------------------------------------------------------------
+# ADD GENERAL FINDINGS
+#
+# Contains:
+#   - Systemd services
+# ------------------------------------------------------------
+
+- name: Add general health findings
+  ansible.builtin.set_fact:
+    hc_all_findings: >-
+      {{
+        hc_all_findings +
+        (hc_findings | default([]))
+      }}
+
+
+# ------------------------------------------------------------
+# ADD FILESYSTEM FINDINGS
+#
+# Filesystem findings are maintained separately in
+# hc_filesystem_findings.
+# ------------------------------------------------------------
+
+- name: Add filesystem findings
+  ansible.builtin.set_fact:
+    hc_all_findings: >-
+      {{
+        hc_all_findings +
+        (hc_filesystem_findings | default([]))
+      }}
+
+
+# ------------------------------------------------------------
+# DETERMINE OVERALL SERVER HEALTH
+# ------------------------------------------------------------
+
+- name: Determine overall server health
+  ansible.builtin.set_fact:
+    hc_overall_status: >-
+      {{
+        'CRITICAL'
+        if (
+          hc_all_findings
+          | selectattr('severity', 'equalto', 'CRITICAL')
+          | list
+          | length
+        ) > 0
+        else
+        'WARNING'
+        if (
+          hc_all_findings
+          | selectattr('severity', 'equalto', 'WARNING')
+          | list
+          | length
+        ) > 0
+        else
+        'OK'
+      }}
+
+
+# ------------------------------------------------------------
+# COUNT FINDINGS BY SEVERITY
+# ------------------------------------------------------------
+
+- name: Calculate finding summary
+  ansible.builtin.set_fact:
+    hc_critical_count: >-
+      {{
+        hc_all_findings
+        | selectattr('severity', 'equalto', 'CRITICAL')
+        | list
+        | length
+      }}
+
+    hc_warning_count: >-
+      {{
+        hc_all_findings
+        | selectattr('severity', 'equalto', 'WARNING')
+        | list
+        | length
+      }}
+
+    hc_info_count: >-
+      {{
+        hc_all_findings
+        | selectattr('severity', 'equalto', 'INFO')
+        | list
+        | length
+      }}
+
+    hc_ok_count: >-
+      {{
+        hc_all_findings
+        | selectattr('severity', 'equalto', 'OK')
+        | list
+        | length
+      }}
+
+
+# ------------------------------------------------------------
+# DISPLAY FINAL HEALTH SUMMARY
+# ------------------------------------------------------------
+
+- name: Display overall health summary
+  ansible.builtin.debug:
+    msg:
+      - "=================================================="
+      - "STC RHEL OS HEALTH CHECK"
+      - "Server: {{ ansible_hostname }}"
+      - "=================================================="
+      - "Overall Health: {{ hc_overall_status }}"
+      - "CRITICAL Findings: {{ hc_critical_count }}"
+      - "WARNING Findings: {{ hc_warning_count }}"
+      - "INFO Findings: {{ hc_info_count }}"
+      - "OK Findings: {{ hc_ok_count }}"
+      - "Total Findings: {{ hc_all_findings | length }}"
+      - "=================================================="
+
+
+# ------------------------------------------------------------
+# DISPLAY ALL FINDINGS
+# ------------------------------------------------------------
+
+- name: Display all health findings
+  ansible.builtin.debug:
+    var: hc_all_findings

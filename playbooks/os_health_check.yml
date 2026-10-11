@@ -1,0 +1,8 @@
+---
+ - name: STC RHEL OS Health Check 
+   hosts: rhel_servers
+   become: true 
+   gather_facts:
+   roles:
+    - os_health
+

@@ -1,0 +1,54 @@
+---
+ - name: Collect server identity 
+   ansible.builtin.include_tasks:
+     file: identity.yml 
+
+ - name: Collect log and journal information 
+   ansible.builtin.include_tasks:
+     file: logs.yml 
+
+ - name: Collect Kernel information 
+   ansible.builtin.include_tasks:
+     file: kernel.yml 
+
+ - name: Collect Service Information 
+   ansible.builtin.include_tasks:
+     file: services.yml 
+
+ - name: Collect filesystem information 
+   ansible.builtin.include_tasks:
+     file: filesystem.yml
+
+ - name: Collect CPU information
+   ansible.builtin.include_tasks:
+     file: cpu.yml
+
+ - name: Collect memory information 
+   ansible.builtin.include_tasks: 
+     file: memory.yml 
+
+ - name: Assess CPU health
+   ansible.builtin.include_tasks:
+     file: cpu_assessment.yml
+
+ - name: Assess memory health 
+   ansible.builtin.include_tasks:
+     file: memory_assessment.yml 
+
+ - name: Assess kernel health
+   ansible.builtin.include_tasks:
+     file: kernel_assessment.yml
+
+ - name: Asses collected health data 
+   ansible.builtin.include_tasks:
+     file: assessment.yml 
+
+
+
+#------------------------------------
+#Final Overall Aggregation
+#------------------------------------
+
+ - name: Calculate overall server health
+   ansible.builtin.include_tasks:
+     file: overall_assessment.yml 

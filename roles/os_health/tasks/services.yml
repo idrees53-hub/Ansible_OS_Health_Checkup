@@ -1,0 +1,13 @@
+---
+ - name: Collect failed systemd services 
+   ansible.builtin.command: 
+    cmd: systemctl --failed --no-legend --no-pager 
+   register: hc_failed_services
+   changed_when: false
+   failed_when: false 
+
+ - name: Display failed Services 
+   ansible.builtin.debug:
+     var: hc_failed_services.stdout_lines
+
+

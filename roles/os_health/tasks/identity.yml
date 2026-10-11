@@ -1,0 +1,32 @@
+---
+ - name: Collect hostname 
+   ansible.builtin.command:
+    cmd: hostname 
+   register: hc_hostname 
+   changed_when: false 
+
+ - name: Collect operating system release 
+   ansible.builtin.command: 
+    cmd: cat /etc/redhat-release 
+   register: hc_os_release 
+   changed_when: false 
+
+ - name: Collect Kernel Version 
+   ansible.builtin.command:
+    cmd: uname -r 
+   register: hc_kernel 
+   changed_when: false 
+ 
+ - name: Collect Uptime 
+   ansible.builtin.command:
+    cmd: uptime 
+   register: hc_uptime 
+   changed_when: false 
+
+ - name: Display Collected identity 
+   ansible.builtin.debug:
+     msg: 
+      hostname: "{{ hc_hostname.stdout }}"
+      os_release: "{{ hc_os_release.stdout }}"
+      kernel: "{{ hc_kernel.stdout }}"
+      uptime: "{{ hc_uptime.stdout }}"

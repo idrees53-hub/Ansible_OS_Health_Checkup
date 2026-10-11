@@ -1,0 +1,13 @@
+---
+ - name: Collect filesystem usages 
+   ansible.builtin.command:
+     cmd: df -hT 
+   register: hc_filesystems 
+   changed_when: false
+   failed_when: false
+
+ - name: Display filesystem usage 
+   ansible.builtin.debug:
+     var: hc_filesystems.stdout_lines
+     
+
