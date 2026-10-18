@@ -1,8 +1,8 @@
-# STC RHEL OS Health Check Automation
+# RHEL OS Health Check Automation
 
 ## 1. Project Overview
 
-The **STC RHEL OS Health Check Automation** project uses Ansible to automate routine operating system health checks on Red Hat Enterprise Linux (RHEL) servers.
+The **RHEL OS Health Check Automation** project uses Ansible to automate routine operating system health checks on Red Hat Enterprise Linux (RHEL) servers.
 
 The purpose of this project is to reduce manual work, collect important system information, identify potential issues, and generate reports with health assessments and recommendations.
 
@@ -146,8 +146,8 @@ reports/
 └── 2026-Q4/
     ├── data/
     ├── servers/
-    ├── STC_OS_Health_Summary.docx
-    └── STC_OS_Health_Summary.xlsx
+    ├── <NAME>_OS_Health_Summary.docx
+    └── <NAME>_OS_Health_Summary.xlsx
 ```
 
 The reporting period and output location depend on the project configuration.
