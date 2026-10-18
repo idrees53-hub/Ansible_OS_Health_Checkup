@@ -1,2 +1,4 @@
 [rhel_servers]
 rhel9-node1
+rhel9-node2
+rhel9-node3

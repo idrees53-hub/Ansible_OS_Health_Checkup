@@ -1,0 +1,150 @@
+---
+# ============================================================
+# STC RHEL OS HEALTH CHECK
+# OS VERSION HEALTH ASSESSMENT
+#
+# Purpose:
+#   Assess the detected RHEL major version and provide
+#   actionable recommendations.
+#
+# Current policy:
+#
+#   RHEL 8 → WARNING
+#   RHEL 9 → OK
+#
+# Important:
+#   This assessment does NOT perform an OS upgrade.
+#   Diagnostic and remediation commands are recommendations only.
+# ============================================================
+
+
+# ============================================================
+# 1. INITIALIZE OS VERSION FINDINGS
+# ============================================================
+
+- name: Initialize OS version findings
+  ansible.builtin.set_fact:
+    os_version_findings: []
+
+
+# ============================================================
+# 2. RHEL 8 ASSESSMENT
+# ============================================================
+
+- name: Report RHEL 8 upgrade recommendation
+  ansible.builtin.set_fact:
+    os_version_findings: >-
+      {{
+        os_version_findings +
+        [
+          {
+            'category': 'OS Version',
+
+            'id': 'rhel8_upgrade_recommended',
+
+            'severity': 'WARNING',
+
+            'message':
+              'Server is running RHEL 8. Upgrade to RHEL 9 is recommended.',
+
+            'evidence':
+              os_version_result.stdout,
+
+            'impact':
+              'The server is running an older major RHEL release. '
+              'Remaining on RHEL 8 may increase lifecycle, security, '
+              'software compatibility, and support risks depending on '
+              'the organization support policy and application requirements.',
+
+            'diagnostic_commands':
+              [
+                'cat /etc/redhat-release',
+                'rpm -E %{rhel}',
+                'subscription-manager status',
+                'subscription-manager release --show',
+                'dnf repolist',
+                'dnf updateinfo summary'
+              ],
+
+            'root_cause_checks':
+              [
+                'Confirm whether the server is intentionally maintained on RHEL 8.',
+                'Check application compatibility with RHEL 9.',
+                'Verify that required RHEL 9 repositories are available.',
+                'Verify that the server has an active Red Hat subscription.',
+                'Check whether the server is subject to an approved OS lifecycle or upgrade plan.',
+                'Review backup and rollback requirements before planning the upgrade.'
+              ],
+
+            'remediation':
+              [
+                'Validate application and middleware compatibility with RHEL 9.',
+                'Confirm repository and subscription readiness for RHEL 9.',
+                'Create or verify a tested backup and rollback plan.',
+                'Plan the RHEL 8 to RHEL 9 upgrade through the approved change-management process.',
+                'Perform the upgrade during an approved maintenance window.',
+                'Validate applications, services, networking, storage, and monitoring after the upgrade.'
+              ],
+
+            'recommendation':
+              'Plan and perform an upgrade from RHEL 8 to RHEL 9 after '
+              'validating application compatibility, repository availability, '
+              'subscription status, backup and rollback readiness, and the '
+              'approved change procedure.'
+          }
+        ]
+      }}
+  when:
+    - rhel_major_version.stdout | trim == '8'
+
+
+# ============================================================
+# 3. RHEL 9 ASSESSMENT
+# ============================================================
+
+- name: Report supported RHEL 9
+  ansible.builtin.set_fact:
+    os_version_findings: >-
+      {{
+        os_version_findings +
+        [
+          {
+            'category': 'OS Version',
+
+            'id': 'rhel9_version',
+
+            'severity': 'OK',
+
+            'message':
+              'Server is running RHEL 9.',
+
+            'evidence':
+              os_version_result.stdout,
+
+            'impact':
+              'No OS version concern was identified by the current '
+              'RHEL version assessment policy.',
+
+            'diagnostic_commands': [],
+
+            'root_cause_checks': [],
+
+            'remediation': [],
+
+            'recommendation':
+              'No action required. Continue routine OS lifecycle, '
+              'patching, subscription, and application compatibility monitoring.'
+          }
+        ]
+      }}
+  when:
+    - rhel_major_version.stdout | trim == '9'
+
+
+# ============================================================
+# 4. DISPLAY OS VERSION FINDINGS
+# ============================================================
+
+- name: Display OS version findings
+  ansible.builtin.debug:
+    var: os_version_findings

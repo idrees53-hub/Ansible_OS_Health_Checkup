@@ -1,0 +1,106 @@
+---
+# ============================================================
+# STC RHEL OS HEALTH CHECK
+# SAR HEALTH ASSESSMENT
+#
+# Purpose:
+#   Determine whether SAR/sysstat historical performance data
+#   is available for the server.
+#
+# Current policy:
+#
+#   SAR unavailable → Skip completely
+#   SAR available   → OK
+#
+# Important:
+#   SAR availability itself is not considered a health failure.
+#   Diagnostic/remediation information is only provided when
+#   SAR is available or when administrators choose to enable it.
+#
+# No SAR installation or configuration is performed here.
+# ============================================================
+
+
+# ============================================================
+# 1. INITIALIZE SAR FINDINGS
+# ============================================================
+
+- name: Initialize SAR findings
+  ansible.builtin.set_fact:
+    sar_findings: []
+
+
+# ============================================================
+# 2. SAR UNAVAILABLE
+# ============================================================
+
+- name: Report SAR unavailable
+  ansible.builtin.debug:
+    msg: "SAR/sysstat data is not available on this server. SAR assessment will be skipped."
+  when:
+    - not (sar_available | default(false) | bool)
+
+
+# ============================================================
+# 3. SAR AVAILABLE
+# ============================================================
+
+- name: Report SAR availability
+  ansible.builtin.set_fact:
+    sar_findings: >-
+      {{
+        sar_findings +
+        [
+          {
+            'category': 'SAR',
+
+            'id': 'sar_available',
+
+            'severity': 'OK',
+
+            'message':
+              'SAR/sysstat data is available for historical performance analysis.',
+
+            'evidence':
+              'The sysstat package is installed and SAR data collection commands are available.',
+
+            'impact':
+              'Historical SAR data can be used to investigate CPU, memory, '
+              'load, and other performance trends when sufficient historical '
+              'data has been collected.',
+
+            'diagnostic_commands':
+              [
+                'rpm -q sysstat',
+                'systemctl status sysstat-collect.timer --no-pager',
+                'systemctl status sysstat-summary.timer --no-pager',
+                'ls -lh /var/log/sa/',
+                'sar -u',
+                'sar -r',
+                'sar -q'
+              ],
+
+            'root_cause_checks': [],
+
+            'remediation': [],
+
+            'recommendation':
+              'No action required. Continue routine monitoring of SAR '
+              'collection and retain sufficient historical performance data '
+              'for capacity planning and troubleshooting.'
+          }
+        ]
+      }}
+  when:
+    - sar_available | bool
+
+
+# ============================================================
+# 4. DISPLAY SAR FINDINGS
+# ============================================================
+
+- name: Display SAR findings
+  ansible.builtin.debug:
+    var: sar_findings
+  when:
+    - sar_available | bool

@@ -1,0 +1,97 @@
+---
+# =========================================================
+# STC RHEL OS HEALTH CHECK
+# NTP / CHRONY DATA COLLECTION
+#
+# Collection only.
+# No health decisions are made here.
+# =========================================================
+
+# ---------------------------------------------------------
+# CHRONY SERVICE
+# ---------------------------------------------------------
+
+- name: Collect Chrony service state
+  ansible.builtin.command:
+    cmd: systemctl is-active chronyd
+  register: hc_chrony_service
+  changed_when: false
+  failed_when: false
+
+# ---------------------------------------------------------
+# CHRONY TRACKING
+# ---------------------------------------------------------
+
+- name: Collect Chrony tracking information
+  ansible.builtin.command:
+    cmd: chronyc tracking
+  register: hc_chrony_tracking
+  changed_when: false
+  failed_when: false
+
+# ---------------------------------------------------------
+# CHRONY SOURCES
+# ---------------------------------------------------------
+
+- name: Collect Chrony sources
+  ansible.builtin.command:
+    cmd: chronyc sources -n
+  register: hc_chrony_sources
+  changed_when: false
+  failed_when: false
+
+# ---------------------------------------------------------
+# CHRONY SOURCE STATISTICS
+# ---------------------------------------------------------
+
+- name: Collect Chrony source statistics
+  ansible.builtin.command:
+    cmd: chronyc sourcestats -n
+  register: hc_chrony_sourcestats
+  changed_when: false
+  failed_when: false
+
+# ---------------------------------------------------------
+# SYSTEM TIME SYNCHRONIZATION
+# ---------------------------------------------------------
+
+- name: Collect timedatectl synchronization state
+  ansible.builtin.command:
+    cmd: timedatectl show
+  register: hc_timedatectl
+  changed_when: false
+  failed_when: false
+
+# ---------------------------------------------------------
+# STRUCTURED NTP DATA
+# ---------------------------------------------------------
+
+- name: Build structured NTP data
+  ansible.builtin.set_fact:
+    hc_ntp_data:
+
+      chrony:
+        service_state: "{{ hc_chrony_service.stdout | default('unknown') | trim }}"
+        tracking: "{{ hc_chrony_tracking.stdout | default('') }}"
+        sources: "{{ hc_chrony_sources.stdout | default('') }}"
+        sourcestats: "{{ hc_chrony_sourcestats.stdout | default('') }}"
+
+      timedatectl:
+        raw: "{{ hc_timedatectl.stdout | default('') }}"
+
+# ---------------------------------------------------------
+# COLLECTION SUMMARY
+# ---------------------------------------------------------
+
+- name: Display NTP collection summary
+  ansible.builtin.debug:
+    msg:
+      - "=================================================="
+      - "NTP / CHRONY DATA COLLECTION"
+      - "=================================================="
+      - "Chrony service: {{ hc_ntp_data.chrony.service_state }}"
+      - "Chrony tracking collected: {{ 'Yes' if hc_ntp_data.chrony.tracking | length > 0 else 'No' }}"
+      - "Chrony sources collected: {{ 'Yes' if hc_ntp_data.chrony.sources | length > 0 else 'No' }}"
+      - "Chrony source statistics collected: {{ 'Yes' if hc_ntp_data.chrony.sourcestats | length > 0 else 'No' }}"
+      - "timedatectl data collected: {{ 'Yes' if hc_ntp_data.timedatectl.raw | length > 0 else 'No' }}"
+      - "=================================================="

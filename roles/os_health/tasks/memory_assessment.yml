@@ -6,14 +6,20 @@
 # Purpose:
 #   Analyze the memory dataset collected by memory.yml.
 #
-# Severity:
-#   CRITICAL
-#   WARNING
-#   INFO
-#   OK
+# Finding schema:
+#   category
+#   id
+#   severity
+#   message
+#   evidence
+#   impact
+#   diagnostic_commands
+#   root_cause_checks
+#   remediation
+#   recommendation
 #
-# This file does NOT collect memory information.
-# It only evaluates hc_memory_data.
+# This file ONLY assesses collected data.
+# It does NOT collect or execute diagnostic commands.
 # ============================================================
 
 
@@ -28,12 +34,6 @@
 
 # ============================================================
 # 2. MEMORY UTILIZATION
-#
-# Example:
-#
-#   39.52%  -> OK
-#   82%     -> WARNING
-#   93%     -> CRITICAL
 # ============================================================
 
 - name: Assess memory utilization
@@ -44,6 +44,8 @@
         [
           {
             'category': 'memory',
+            'id': 'memory_utilization',
+
             'severity':
               'CRITICAL'
               if (hc_memory_data.utilization_percent | float)
@@ -69,9 +71,52 @@
               ~ (hc_memory_data.utilization_percent | float | round(2) | string)
               ~ '%.',
 
+            'impact':
+              'High sustained memory utilization can lead to memory pressure, swapping, application performance degradation, or out-of-memory events.'
+              if (hc_memory_data.utilization_percent | float)
+                 >= (health_check.memory.utilization.warning_percent | float)
+              else
+              'Current memory utilization is within the configured threshold.',
+
+            'diagnostic_commands':
+              [
+                'free -h',
+                'ps -eo pid,ppid,cmd,%mem,%cpu --sort=-%mem | head -n 6',
+                'vmstat 1 5'
+              ]
+              if (hc_memory_data.utilization_percent | float)
+                 >= (health_check.memory.utilization.warning_percent | float)
+              else [],
+
+            'root_cause_checks':
+              [
+                'Identify the processes consuming the most memory.',
+                'Check whether high memory usage is sustained or temporary.',
+                'Determine whether the workload is expected for this server.',
+                'Check for memory pressure or active swapping.',
+                'Review application memory usage and possible memory leaks.'
+              ]
+              if (hc_memory_data.utilization_percent | float)
+                 >= (health_check.memory.utilization.warning_percent | float)
+              else [],
+
+            'remediation':
+              [
+                'Investigate the highest memory-consuming processes before restarting or terminating them.',
+                'Review application configuration and memory consumption.',
+                'Investigate possible memory leaks if usage continuously increases.',
+                'Consider workload tuning or additional RAM if sustained high utilization is expected.'
+              ]
+              if (hc_memory_data.utilization_percent | float)
+                 >= (health_check.memory.utilization.warning_percent | float)
+              else [],
+
             'recommendation':
-              'Investigate memory-consuming processes and memory pressure. '
-              'Consider workload tuning or additional memory if high utilization persists.'
+              'Investigate memory-consuming processes and memory pressure. Consider workload tuning or additional memory if high utilization persists.'
+              if (hc_memory_data.utilization_percent | float)
+                 >= (health_check.memory.utilization.warning_percent | float)
+              else
+              'No action required. Continue routine memory monitoring.'
           }
         ]
       }}
@@ -79,9 +124,6 @@
 
 # ============================================================
 # 3. SWAP UTILIZATION
-#
-# Swap itself is not automatically a problem.
-# High sustained swap usage can indicate memory pressure.
 # ============================================================
 
 - name: Assess swap utilization
@@ -92,6 +134,8 @@
         [
           {
             'category': 'memory',
+            'id': 'swap_utilization',
+
             'severity':
               'CRITICAL'
               if (hc_memory_data.swap.utilization_percent | float)
@@ -117,23 +161,59 @@
               ~ (hc_memory_data.swap.utilization_percent | float | round(2) | string)
               ~ '%.',
 
+            'impact':
+              'High swap utilization can indicate memory pressure and may increase application latency because disk-backed memory is slower than RAM.'
+              if (hc_memory_data.swap.utilization_percent | float)
+                 >= (health_check.memory.swap.warning_percent | float)
+              else
+              'Current swap utilization is within the configured threshold.',
+
+            'diagnostic_commands':
+              [
+                'free -h',
+                'swapon --show',
+                'vmstat 1 5'
+              ]
+              if (hc_memory_data.swap.utilization_percent | float)
+                 >= (health_check.memory.swap.warning_percent | float)
+              else [],
+
+            'root_cause_checks':
+              [
+                'Check available and used physical memory.',
+                'Identify processes consuming significant memory.',
+                'Check whether swap activity is currently occurring.',
+                'Determine whether swap usage is sustained or historical.',
+                'Review whether the server has sufficient RAM for its workload.'
+              ]
+              if (hc_memory_data.swap.utilization_percent | float)
+                 >= (health_check.memory.swap.warning_percent | float)
+              else [],
+
+            'remediation':
+              [
+                'Investigate memory-consuming processes.',
+                'Reduce unnecessary memory consumption where possible.',
+                'Tune application workloads if excessive memory usage is identified.',
+                'Consider additional RAM if sustained memory pressure is confirmed.'
+              ]
+              if (hc_memory_data.swap.utilization_percent | float)
+                 >= (health_check.memory.swap.warning_percent | float)
+              else [],
+
             'recommendation':
-              'Investigate memory pressure and identify processes consuming significant memory. '
-              'Review whether additional RAM or workload tuning is required.'
+              'Investigate memory pressure and identify processes consuming significant memory. Review whether additional RAM or workload tuning is required.'
+              if (hc_memory_data.swap.utilization_percent | float)
+                 >= (health_check.memory.swap.warning_percent | float)
+              else
+              'No action required. Continue routine swap monitoring.'
           }
         ]
       }}
 
 
 # ============================================================
-# 4. SWAP ACTIVITY
-#
-# vmstat fields:
-#
-#   si = swap in
-#   so = swap out
-#
-# We use the latest sample.
+# 4. EXTRACT LATEST SWAP ACTIVITY
 # ============================================================
 
 - name: Extract latest swap activity
@@ -167,6 +247,8 @@
         [
           {
             'category': 'memory',
+            'id': 'swap_activity',
+
             'severity':
               'CRITICAL'
               if (
@@ -203,9 +285,77 @@
               ~ (hc_memory_swap_out | int | string)
               ~ '.',
 
+            'impact':
+              'Active swapping can indicate memory pressure and may cause application performance degradation.'
+              if (
+                (hc_memory_swap_in | int)
+                >= (health_check.memory.swap_activity.warning_threshold | int)
+                or
+                (hc_memory_swap_out | int)
+                >= (health_check.memory.swap_activity.warning_threshold | int)
+              )
+              else
+              'No significant swap activity was detected during the sampling period.',
+
+            'diagnostic_commands':
+              [
+                'free -h',
+                'vmstat 1 5',
+                'ps -eo pid,ppid,cmd,%mem,%cpu --sort=-%mem | head -n 6'
+              ]
+              if (
+                (hc_memory_swap_in | int)
+                >= (health_check.memory.swap_activity.warning_threshold | int)
+                or
+                (hc_memory_swap_out | int)
+                >= (health_check.memory.swap_activity.warning_threshold | int)
+              )
+              else [],
+
+            'root_cause_checks':
+              [
+                'Check physical memory availability.',
+                'Identify memory-intensive processes.',
+                'Determine whether swap activity is sustained.',
+                'Check whether application workload recently increased.',
+                'Review historical memory pressure if monitoring data is available.'
+              ]
+              if (
+                (hc_memory_swap_in | int)
+                >= (health_check.memory.swap_activity.warning_threshold | int)
+                or
+                (hc_memory_swap_out | int)
+                >= (health_check.memory.swap_activity.warning_threshold | int)
+              )
+              else [],
+
+            'remediation':
+              [
+                'Investigate and reduce excessive memory consumption.',
+                'Review application memory configuration.',
+                'Tune workloads causing sustained memory pressure.',
+                'Add memory capacity if sustained swapping is confirmed.'
+              ]
+              if (
+                (hc_memory_swap_in | int)
+                >= (health_check.memory.swap_activity.warning_threshold | int)
+                or
+                (hc_memory_swap_out | int)
+                >= (health_check.memory.swap_activity.warning_threshold | int)
+              )
+              else [],
+
             'recommendation':
-              'Investigate memory pressure and identify processes consuming memory '
-              'if sustained swap activity is observed.'
+              'Investigate memory pressure and identify processes consuming memory if sustained swap activity is observed.'
+              if (
+                (hc_memory_swap_in | int)
+                >= (health_check.memory.swap_activity.warning_threshold | int)
+                or
+                (hc_memory_swap_out | int)
+                >= (health_check.memory.swap_activity.warning_threshold | int)
+              )
+              else
+              'No action required. No significant swap activity was detected.'
           }
         ]
       }}
@@ -213,9 +363,6 @@
 
 # ============================================================
 # 6. OOM EVENTS
-#
-# An OOM event is much more serious than ordinary high memory
-# utilization because the kernel may have killed processes.
 # ============================================================
 
 - name: Assess OOM events
@@ -226,12 +373,45 @@
         [
           {
             'category': 'memory',
+            'id': 'oom_event',
             'severity': 'CRITICAL',
-            'message': 'Out-of-memory activity was detected in the current boot journal.',
-            'evidence': hc_memory_data.oom.evidence,
+
+            'message':
+              'Out-of-memory activity was detected in the current boot journal.',
+
+            'evidence':
+              hc_memory_data.oom.evidence,
+
+            'impact':
+              'The Linux kernel may have terminated one or more processes because available memory was exhausted.',
+
+            'diagnostic_commands':
+              [
+                "journalctl -k -b --no-pager | grep -Ei 'out of memory|oom|killed process'",
+                'free -h',
+                'ps -eo pid,ppid,cmd,%mem,%cpu --sort=-%mem | head -n 6'
+              ],
+
+            'root_cause_checks':
+              [
+                'Identify the process terminated by the OOM killer.',
+                'Review memory consumption immediately before the OOM event if historical monitoring is available.',
+                'Check whether the server has sufficient physical memory.',
+                'Review application memory limits and configuration.',
+                'Check for possible application memory leaks.'
+              ],
+
+            'remediation':
+              [
+                'Investigate the terminated process and associated application workload.',
+                'Correct application memory leaks or excessive memory consumption.',
+                'Review and adjust application memory limits where appropriate.',
+                'Consider increasing available RAM if capacity is insufficient.',
+                'Implement monitoring and alerting for recurring memory pressure.'
+              ],
+
             'recommendation':
-              'Investigate the OOM event using journalctl and identify the process '
-              'that was terminated. Review memory limits and workload consumption.'
+              'Investigate the OOM event immediately. Identify the terminated process, review memory consumption and application limits, and determine whether additional memory capacity is required.'
           }
         ]
       }}
@@ -242,14 +422,6 @@
 
 # ============================================================
 # 7. PSI INFORMATION
-#
-# PSI is optional.
-#
-# If unavailable:
-#   INFO is not generated.
-#
-# If available:
-#   We retain the data for future assessment rules.
 # ============================================================
 
 - name: Add memory PSI information
@@ -260,11 +432,26 @@
         [
           {
             'category': 'memory',
+            'id': 'memory_psi',
             'severity': 'INFO',
-            'message': 'Memory Pressure Stall Information (PSI) is available.',
-            'evidence': hc_memory_data.psi.raw,
+
+            'message':
+              'Memory Pressure Stall Information (PSI) is available.',
+
+            'evidence':
+              hc_memory_data.psi.raw,
+
+            'impact':
+              'Memory PSI can provide additional visibility into time spent waiting for memory resources.',
+
+            'diagnostic_commands': [],
+
+            'root_cause_checks': [],
+
+            'remediation': [],
+
             'recommendation':
-              'Use memory PSI metrics for deeper memory-pressure analysis.'
+              'Use memory PSI metrics for deeper memory-pressure analysis when investigating performance issues.'
           }
         ]
       }}
@@ -290,35 +477,42 @@
 
     hc_memory_critical_count: >-
       {{
-       (
-         hc_memory_findings
-         | selectattr('severity', 'equalto', 'CRITICAL')
-         | list
-         | length
-       ) | int
+        (
+          hc_memory_findings
+          | selectattr('severity', 'equalto', 'CRITICAL')
+          | list
+          | length
+        ) | int
       }}
+
     hc_memory_warning_count: >-
       {{
-        hc_memory_findings
-        | selectattr('severity', 'equalto', 'WARNING')
-        | list
-        | length
+        (
+          hc_memory_findings
+          | selectattr('severity', 'equalto', 'WARNING')
+          | list
+          | length
+        ) | int
       }}
 
     hc_memory_info_count: >-
       {{
-        hc_memory_findings
-        | selectattr('severity', 'equalto', 'INFO')
-        | list
-        | length
+        (
+          hc_memory_findings
+          | selectattr('severity', 'equalto', 'INFO')
+          | list
+          | length
+        ) | int
       }}
 
     hc_memory_ok_count: >-
       {{
-        hc_memory_findings
-        | selectattr('severity', 'equalto', 'OK')
-        | list
-        | length
+        (
+          hc_memory_findings
+          | selectattr('severity', 'equalto', 'OK')
+          | list
+          | length
+        ) | int
       }}
 
 

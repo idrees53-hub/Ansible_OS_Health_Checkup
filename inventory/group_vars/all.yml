@@ -1,6 +1,11 @@
 ---
 health_check:
+
   log_lookback_days: 7
+
+  uptime:
+    warning_days: 180
+    critical_days: 365
 
   filesystem:
     warning_percent: 80
@@ -23,6 +28,31 @@ health_check:
   kernel:
     analyze_errors: true
     analyze_warnings: true
+
+    findings:
+      wx_violation:
+        severity: INFO
+
+      x509_certificate:
+        severity: WARNING
+
+      smbus_uninitialized:
+        severity: INFO
+
+      unmaintained_ip_set:
+        severity: WARNING
+
+      vmware_vmwgfx_memory:
+        severity: INFO
+
+      device_mapper_deprecated:
+        severity: INFO
+
+      cpuid_perf_events:
+        severity: INFO
+
+      ima_measurement:
+        severity: INFO
 
   services:
     check_failed_services: true
@@ -65,6 +95,17 @@ health_check:
     oom:
       critical: true
 
+  ntp:
+    offset:
+      warning_seconds: 0.1
+      critical_seconds: 1.0
+
+    stratum:
+      warning: 10
+      critical: 16
+
+    require_synchronization: true
+    require_source: true
 
 server_profile:
   role: application

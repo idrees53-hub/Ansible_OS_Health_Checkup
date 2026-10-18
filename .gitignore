@@ -1,0 +1,14 @@
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Temporary backup files
+*.bak
+backups/
+
+# Generated health-check reports and collected data
+reports/
+collected_data/
+
+# Temporary files
+*.tmp

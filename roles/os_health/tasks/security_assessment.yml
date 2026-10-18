@@ -1,0 +1,428 @@
+---
+# =========================================================
+# STC RHEL OS HEALTH CHECK
+# SECURITY HEALTH ASSESSMENT
+#
+# Domains:
+#   - SELinux
+#   - Firewall
+#   - Red Hat Subscription
+#
+# Assessment only.
+# No changes are made to the server.
+# =========================================================
+
+
+- name: Initialize security findings
+  ansible.builtin.set_fact:
+    hc_security_findings: []
+
+
+# ---------------------------------------------------------
+# SELINUX
+# ---------------------------------------------------------
+
+- name: Assess SELinux enforcing state
+  ansible.builtin.set_fact:
+    hc_security_findings: >-
+      {{
+        hc_security_findings +
+        [
+          {
+            'id': 'selinux_enforcing',
+            'category': 'security',
+            'severity': 'OK',
+            'message': 'SELinux is enforcing.',
+            'evidence': hc_security_data.selinux.status,
+            'impact': 'SELinux is enforcing and providing mandatory access control protection.',
+            'diagnostic_commands': [],
+            'root_cause_checks': [],
+            'remediation': [],
+            'recommendation': 'No action required. Continue routine SELinux monitoring.'
+          }
+        ]
+      }}
+  when:
+    - hc_security_data.selinux.status | lower == 'enforcing'
+
+
+- name: Assess SELinux permissive state
+  ansible.builtin.set_fact:
+    hc_security_findings: >-
+      {{
+        hc_security_findings +
+        [
+          {
+            'id': 'selinux_permissive',
+            'category': 'security',
+            'severity': 'WARNING',
+            'message': 'SELinux is running in permissive mode.',
+            'evidence': hc_security_data.selinux.status,
+            'impact': 'SELinux policy violations are logged but not enforced, reducing mandatory access control protection.',
+            'diagnostic_commands': [
+              'getenforce',
+              'sestatus',
+              'ausearch -m AVC -ts recent'
+            ],
+            'root_cause_checks': [
+              'Determine why SELinux was placed into permissive mode.',
+              'Check whether an application or troubleshooting activity requires permissive mode.',
+              'Review recent SELinux AVC denials.',
+              'Compare the current configuration with the approved security baseline.'
+            ],
+            'remediation': [
+              'Review and resolve relevant SELinux policy violations.',
+              'Validate application compatibility with SELinux enforcing mode.',
+              'Return SELinux to enforcing mode through the approved change-management process.'
+            ],
+            'recommendation': 'Investigate why SELinux is permissive and restore enforcing mode when application compatibility and the approved security baseline permit it.'
+          }
+        ]
+      }}
+  when:
+    - hc_security_data.selinux.status | lower == 'permissive'
+
+
+- name: Assess SELinux disabled state
+  ansible.builtin.set_fact:
+    hc_security_findings: >-
+      {{
+        hc_security_findings +
+        [
+          {
+            'id': 'selinux_disabled',
+            'category': 'security',
+            'severity': 'CRITICAL',
+            'message': 'SELinux is disabled.',
+            'evidence': hc_security_data.selinux.status,
+            'impact': 'The server is operating without SELinux mandatory access control protection, increasing security exposure.',
+            'diagnostic_commands': [
+              'getenforce',
+              'sestatus',
+              'grep -E "^SELINUX=" /etc/selinux/config',
+              'ausearch -m AVC -ts recent'
+            ],
+            'root_cause_checks': [
+              'Determine why SELinux was disabled.',
+              'Check whether an application dependency caused SELinux to be disabled.',
+              'Review the approved server security baseline.',
+              'Check whether recent configuration or troubleshooting changes disabled SELinux.'
+            ],
+            'remediation': [
+              'Validate application compatibility with SELinux enforcing mode.',
+              'Update the SELinux configuration according to the approved security baseline.',
+              'Resolve relevant SELinux policy issues before enabling enforcement.',
+              'Schedule a controlled reboot if required by the approved configuration change.'
+            ],
+            'recommendation': 'Investigate why SELinux is disabled and restore enforcing mode according to the approved STC security baseline and change-management process.'
+          }
+        ]
+      }}
+  when:
+    - hc_security_data.selinux.status | lower == 'disabled'
+
+
+# ---------------------------------------------------------
+# FIREWALL
+# ---------------------------------------------------------
+
+- name: Assess active firewalld
+  ansible.builtin.set_fact:
+    hc_security_findings: >-
+      {{
+        hc_security_findings +
+        [
+          {
+            'id': 'firewalld_active',
+            'category': 'security',
+            'severity': 'OK',
+            'message': 'firewalld is active.',
+            'evidence': hc_security_data.firewall.firewalld.state,
+            'impact': 'The host firewall service is active and providing host-level network filtering.',
+            'diagnostic_commands': [],
+            'root_cause_checks': [],
+            'remediation': [],
+            'recommendation': 'No action required. Continue routine firewall monitoring.'
+          }
+        ]
+      }}
+  when:
+    - hc_security_data.firewall.firewalld.state | lower == 'active'
+
+
+- name: Assess inactive firewalld with active nftables
+  ansible.builtin.set_fact:
+    hc_security_findings: >-
+      {{
+        hc_security_findings +
+        [
+          {
+            'id': 'firewalld_inactive_nftables_active',
+            'category': 'security',
+            'severity': 'INFO',
+            'message': 'firewalld is inactive but nftables is active.',
+            'evidence': 'firewalld='
+              ~ hc_security_data.firewall.firewalld.state
+              ~ '; nftables='
+              ~ hc_security_data.firewall.nftables.state,
+            'impact': 'Host firewall protection may still be provided by nftables, but the active firewall implementation should match the approved server architecture.',
+            'diagnostic_commands': [
+              'systemctl is-active firewalld',
+              'systemctl is-active nftables',
+              'firewall-cmd --get-active-zones',
+              'nft list ruleset'
+            ],
+            'root_cause_checks': [
+              'Determine which firewall implementation is approved for the server.',
+              'Review the active nftables ruleset.',
+              'Verify that required network ports are protected.',
+              'Confirm that firewalld being inactive is intentional.'
+            ],
+            'remediation': [
+              'Keep the approved firewall implementation active.',
+              'Do not enable firewalld if nftables is intentionally used as the approved firewall architecture.',
+              'Correct the firewall configuration if the current implementation does not match the approved security baseline.'
+            ],
+            'recommendation': 'Verify that nftables is the approved firewall implementation for this server and confirm that the required firewall rules are present.'
+          }
+        ]
+      }}
+  when:
+    - hc_security_data.firewall.firewalld.state | lower != 'active'
+    - hc_security_data.firewall.nftables.state | lower == 'active'
+
+
+- name: Assess inactive firewall services
+  ansible.builtin.set_fact:
+    hc_security_findings: >-
+      {{
+        hc_security_findings +
+        [
+          {
+            'id': 'firewall_inactive',
+            'category': 'security',
+            'severity': 'WARNING',
+            'message': 'No active firewalld or nftables service was detected.',
+            'evidence': 'firewalld='
+              ~ hc_security_data.firewall.firewalld.state
+              ~ '; nftables='
+              ~ hc_security_data.firewall.nftables.state,
+            'impact': 'The server may not have an active host-based firewall, potentially increasing exposure to unauthorized network access.',
+            'diagnostic_commands': [
+              'systemctl is-active firewalld',
+              'systemctl is-active nftables',
+              'firewall-cmd --get-active-zones',
+              'nft list ruleset',
+              'ss -tulnp'
+            ],
+            'root_cause_checks': [
+              'Determine whether a host-based firewall is required by the server security baseline.',
+              'Identify whether firewall protection is provided by another approved security control.',
+              'Review the current firewall configuration.',
+              'Identify listening network services that require protection.'
+            ],
+            'remediation': [
+              'Enable and configure the approved host firewall implementation.',
+              'Apply the required firewall rules according to the server security baseline.',
+              'Validate application connectivity after firewall configuration changes.'
+            ],
+            'recommendation': 'Verify the server firewall architecture and ensure that the host is protected according to the approved STC security baseline.'
+          }
+        ]
+      }}
+  when:
+    - hc_security_data.firewall.firewalld.state | lower != 'active'
+    - hc_security_data.firewall.nftables.state | lower != 'active'
+
+
+# ---------------------------------------------------------
+# RED HAT SUBSCRIPTION
+# ---------------------------------------------------------
+
+- name: Assess unregistered Red Hat system
+  ansible.builtin.set_fact:
+    hc_security_findings: >-
+      {{
+        hc_security_findings +
+        [
+          {
+            'id': 'redhat_subscription_unregistered',
+            'category': 'security',
+            'severity': 'WARNING',
+            'message': 'The RHEL system is not registered with Red Hat Subscription Management.',
+            'evidence':
+              (
+                hc_security_data.subscription.identity.error
+                if hc_security_data.subscription.identity.error | length > 0
+                else hc_security_data.subscription.identity.output
+              ),
+            'impact': 'The server may not have access to required Red Hat repositories, updates, security errata, or supported content.',
+            'diagnostic_commands': [
+              'subscription-manager identity',
+              'subscription-manager status',
+              'subscription-manager repos --list-enabled',
+              'subscription-manager list --consumed'
+            ],
+            'root_cause_checks': [
+              'Confirm whether the server is intentionally unregistered.',
+              'Verify the approved STC or organizational subscription-management infrastructure.',
+              'Check whether the server requires access to Red Hat repositories.',
+              'Verify network connectivity to the approved subscription service.'
+            ],
+            'remediation': [
+              'Register the system using the approved Red Hat subscription-management process.',
+              'Attach the required subscription or entitlement.',
+              'Enable the repositories required by the server role.',
+              'Verify repository access after registration.'
+            ],
+            'recommendation': 'Register the RHEL system through the approved subscription-management infrastructure and verify that the required entitlements and repositories are available.'
+          }
+        ]
+      }}
+  when:
+    - hc_security_data.subscription.identity.rc | int != 0
+    - >
+      (
+        hc_security_data.subscription.identity.error
+        ~ ' '
+        ~ hc_security_data.subscription.identity.output
+      ) is search('not yet registered')
+
+
+- name: Assess registered system without consumed subscription
+  ansible.builtin.set_fact:
+    hc_security_findings: >-
+      {{
+        hc_security_findings +
+        [
+          {
+            'id': 'redhat_subscription_no_consumed_pool',
+            'category': 'security',
+            'severity': 'WARNING',
+            'message': 'The RHEL system is registered but no consumed subscription pools were detected.',
+            'evidence': hc_security_data.subscription.consumed.output,
+            'impact': 'The system may not have the subscription entitlement required to access supported Red Hat content and repositories.',
+            'diagnostic_commands': [
+              'subscription-manager identity',
+              'subscription-manager status',
+              'subscription-manager list --consumed',
+              'subscription-manager repos --list-enabled'
+            ],
+            'root_cause_checks': [
+              'Confirm that the system registration is valid.',
+              'Determine whether the required subscription entitlement is attached.',
+              'Verify that the expected repositories are enabled.',
+              'Check the approved subscription-management configuration.'
+            ],
+            'remediation': [
+              'Attach the required subscription entitlement.',
+              'Enable the repositories required by the server role.',
+              'Verify repository access after the entitlement is configured.'
+            ],
+            'recommendation': 'Verify that the registered system has the required Red Hat subscription entitlement and access to the approved repositories.'
+          }
+        ]
+      }}
+  when:
+    - hc_security_data.subscription.identity.rc | int == 0
+    - >
+      (
+        hc_security_data.subscription.consumed.output
+      ) is search('No consumed subscription pools were found')
+
+
+- name: Assess healthy Red Hat subscription
+  ansible.builtin.set_fact:
+    hc_security_findings: >-
+      {{
+        hc_security_findings +
+        [
+          {
+            'id': 'redhat_subscription_healthy',
+            'category': 'security',
+            'severity': 'OK',
+            'message': 'The RHEL system is registered and has consumed subscription information.',
+            'evidence': hc_security_data.subscription.status.output,
+            'impact': 'The system has Red Hat subscription registration and consumed subscription information available.',
+            'diagnostic_commands': [],
+            'root_cause_checks': [],
+            'remediation': [],
+            'recommendation': 'No action required. Continue routine subscription and repository monitoring.'
+          }
+        ]
+      }}
+  when:
+    - hc_security_data.subscription.identity.rc | int == 0
+    - hc_security_data.subscription.consumed.output is not search('No consumed subscription pools were found')
+
+
+# ---------------------------------------------------------
+# SUMMARY
+# ---------------------------------------------------------
+
+- name: Calculate security health summary
+  ansible.builtin.set_fact:
+    hc_security_critical_count: >-
+      {{
+        hc_security_findings
+        | selectattr('severity', 'equalto', 'CRITICAL')
+        | list
+        | length
+      }}
+
+    hc_security_warning_count: >-
+      {{
+        hc_security_findings
+        | selectattr('severity', 'equalto', 'WARNING')
+        | list
+        | length
+      }}
+
+    hc_security_info_count: >-
+      {{
+        hc_security_findings
+        | selectattr('severity', 'equalto', 'INFO')
+        | list
+        | length
+      }}
+
+    hc_security_ok_count: >-
+      {{
+        hc_security_findings
+        | selectattr('severity', 'equalto', 'OK')
+        | list
+        | length
+      }}
+
+
+- name: Determine security health status
+  ansible.builtin.set_fact:
+    hc_security_status: >-
+      {{
+        'CRITICAL'
+        if hc_security_critical_count | int > 0
+        else
+        'WARNING'
+        if hc_security_warning_count | int > 0
+        else
+        'OK'
+      }}
+
+
+- name: Display security findings
+  ansible.builtin.debug:
+    var: hc_security_findings
+
+
+- name: Display security health summary
+  ansible.builtin.debug:
+    msg:
+      - "=================================================="
+      - "SECURITY HEALTH ASSESSMENT"
+      - "=================================================="
+      - "Security Health: {{ hc_security_status }}"
+      - "CRITICAL Findings: {{ hc_security_critical_count }}"
+      - "WARNING Findings: {{ hc_security_warning_count }}"
+      - "INFO Findings: {{ hc_security_info_count }}"
+      - "OK Findings: {{ hc_security_ok_count }}"
+      - "=================================================="

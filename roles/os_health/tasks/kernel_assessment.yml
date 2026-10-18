@@ -1,12 +1,45 @@
 ---
+# =========================================================
+# STC RHEL OS HEALTH CHECK
+# KERNEL HEALTH ASSESSMENT
+#
+# Detection logic:
+#   Detect known kernel messages collected by kernel.yml
+#
+# Severity policy:
+#   Controlled through health_check.kernel.findings
+#   in inventory/group_vars/all.yml
+#
+# Design:
+#   Detection remains separate from severity policy.
+#   This file does NOT execute diagnostic/remediation commands.
+#
+# Finding schema:
+#   category
+#   id
+#   severity
+#   message
+#   evidence
+#   impact
+#   diagnostic_commands
+#   root_cause_checks
+#   remediation
+#   recommendation
+# =========================================================
+
+
+# =========================================================
+# 1. INITIALIZE KERNEL FINDINGS
+# =========================================================
 
 - name: Initialize kernel findings
   ansible.builtin.set_fact:
     hc_kernel_findings: []
 
-# ---------------------------------------------------------
-# W^X VIOLATION
-# ---------------------------------------------------------
+
+# =========================================================
+# 2. W^X VIOLATION
+# =========================================================
 
 - name: Assess kernel W^X violation
   ansible.builtin.set_fact:
@@ -15,19 +48,57 @@
         hc_kernel_findings +
         [
           {
+            'category': 'kernel',
             'id': 'kernel_wx_violation',
-            'severity': 'WARNING',
-            'message': 'Kernel reported a W^X memory protection violation.',
-            'evidence': 'CPA detected W^X violation',
-            'recommendation': 'Investigate the kernel boot messages and virtualization/firmware configuration. Do not treat this finding alone as evidence of a service outage.'
+
+            'severity':
+              health_check.kernel.findings.wx_violation.severity
+              | default('WARNING'),
+
+            'message':
+              'Kernel reported a W^X memory protection violation.',
+
+            'evidence':
+              'CPA detected W^X violation',
+
+            'impact':
+              'The kernel reported a memory protection condition that may indicate a platform, kernel, firmware, or virtualization compatibility issue.',
+
+            'diagnostic_commands':
+              [
+                "journalctl -k -b --no-pager | grep -i 'CPA detected W.X violation'",
+                'uname -r',
+                'dmesg -T --level=emerg,alert,crit,err,warn | tail -n 100'
+              ],
+
+            'root_cause_checks':
+              [
+                'Confirm whether the message is recurring across boots.',
+                'Review the running kernel version and recent kernel changes.',
+                'Check whether the server is virtualized.',
+                'Review firmware and virtualization platform compatibility.',
+                'Determine whether the message has any associated functional impact.'
+              ],
+
+            'remediation':
+              [
+                'Review the kernel and platform compatibility information.',
+                'Validate the issue against the supported RHEL kernel and virtualization platform.',
+                'Apply approved kernel, firmware, or virtualization configuration updates if a known issue is identified.'
+              ],
+
+            'recommendation':
+              'Investigate the kernel boot message and platform configuration. Do not treat this finding alone as evidence of a service outage.'
           }
         ]
       }}
-  when: "'CPA detected W^X violation' in hc_kernel_warnings.stdout"
+  when:
+    - "'CPA detected W^X violation' in hc_kernel_warnings.stdout"
 
-# ---------------------------------------------------------
-# X.509 CERTIFICATE
-# ---------------------------------------------------------
+
+# =========================================================
+# 3. X.509 CERTIFICATE
+# =========================================================
 
 - name: Assess kernel X.509 certificate issue
   ansible.builtin.set_fact:
@@ -36,19 +107,58 @@
         hc_kernel_findings +
         [
           {
+            'category': 'kernel',
             'id': 'kernel_x509_certificate',
-            'severity': 'WARNING',
-            'message': 'Kernel reported a problem loading an X.509 certificate.',
-            'evidence': 'Problem loading X.509 certificate',
-            'recommendation': 'Review kernel integrity and platform certificate configuration and determine whether the certificate is expected on this server.'
+
+            'severity':
+              health_check.kernel.findings.x509_certificate.severity
+              | default('WARNING'),
+
+            'message':
+              'Kernel reported a problem loading an X.509 certificate.',
+
+            'evidence':
+              'Problem loading X.509 certificate',
+
+            'impact':
+              'A certificate loading problem may affect kernel-integrated trust or security functionality depending on the certificate and subsystem involved.',
+
+            'diagnostic_commands':
+              [
+                "journalctl -k -b --no-pager | grep -i 'Problem loading X.509 certificate'",
+                'uname -r',
+                'mokutil --sb-state',
+                'dmesg -T --level=emerg,alert,crit,err,warn | grep -i -E "X.509|certificate"'
+              ],
+
+            'root_cause_checks':
+              [
+                'Identify the certificate or subsystem associated with the message.',
+                'Check whether Secure Boot is enabled where applicable.',
+                'Review kernel and platform certificate configuration.',
+                'Determine whether the message occurs on every boot.',
+                'Check whether any security or kernel functionality is affected.'
+              ],
+
+            'remediation':
+              [
+                'Validate the certificate configuration against the approved server security baseline.',
+                'Correct missing, invalid, or unexpected certificate configuration where required.',
+                'Apply approved kernel or platform updates if the issue is related to a known compatibility problem.'
+              ],
+
+            'recommendation':
+              'Review kernel integrity and platform certificate configuration and determine whether the certificate is expected on this server.'
           }
         ]
       }}
-  when: "'Problem loading X.509 certificate' in hc_kernel_warnings.stdout"
+  when:
+    - "'Problem loading X.509 certificate' in hc_kernel_warnings.stdout"
 
-# ---------------------------------------------------------
-# SMBUS
-# ---------------------------------------------------------
+
+# =========================================================
+# 4. SMBUS
+# =========================================================
 
 - name: Assess SMBus warning
   ansible.builtin.set_fact:
@@ -57,19 +167,56 @@
         hc_kernel_findings +
         [
           {
+            'category': 'kernel',
             'id': 'kernel_smbus',
-            'severity': 'WARNING',
-            'message': 'Kernel reported an uninitialized SMBus base address.',
-            'evidence': 'SMBus base address uninitialized',
-            'recommendation': 'Review the virtual hardware/BIOS configuration if this message is unexpected for the server platform.'
+
+            'severity':
+              health_check.kernel.findings.smbus_uninitialized.severity
+              | default('WARNING'),
+
+            'message':
+              'Kernel reported an uninitialized SMBus base address.',
+
+            'evidence':
+              'SMBus base address uninitialized',
+
+            'impact':
+              'The message may indicate unavailable or unused SMBus hardware functionality and may be harmless on virtual machines.',
+
+            'diagnostic_commands':
+              [
+                "journalctl -k -b --no-pager | grep -i 'SMBus base address uninitialized'",
+                'lspci -nn',
+                'uname -r'
+              ],
+
+            'root_cause_checks':
+              [
+                'Determine whether the server is physical or virtual.',
+                'Check whether SMBus hardware is actually required by the workload.',
+                'Review BIOS or virtual hardware configuration.',
+                'Determine whether the message is recurring without functional impact.'
+              ],
+
+            'remediation':
+              [
+                'No remediation may be required if SMBus functionality is not needed.',
+                'Review physical or virtual hardware configuration if the message is unexpected.',
+                'Escalate to the hardware or virtualization team if associated with functional issues.'
+              ],
+
+            'recommendation':
+              'Review the virtual hardware or BIOS configuration if this message is unexpected for the server platform.'
           }
         ]
       }}
-  when: "'SMBus base address uninitialized' in hc_kernel_warnings.stdout"
+  when:
+    - "'SMBus base address uninitialized' in hc_kernel_warnings.stdout"
 
-# ---------------------------------------------------------
-# IP_SET DRIVER
-# ---------------------------------------------------------
+
+# =========================================================
+# 5. IP_SET DRIVER
+# =========================================================
 
 - name: Assess unmaintained ip_set driver
   ansible.builtin.set_fact:
@@ -78,19 +225,57 @@
         hc_kernel_findings +
         [
           {
+            'category': 'kernel',
             'id': 'kernel_unmaintained_driver',
-            'severity': 'WARNING',
-            'message': 'Kernel reported an unmaintained ip_set driver.',
-            'evidence': 'Unmaintained driver is detected: ip_set',
-            'recommendation': 'Determine which service or firewall configuration requires the module and verify compatibility with the current RHEL kernel.'
+
+            'severity':
+              health_check.kernel.findings.unmaintained_ip_set.severity
+              | default('WARNING'),
+
+            'message':
+              'Kernel reported an unmaintained ip_set driver.',
+
+            'evidence':
+              'Unmaintained driver is detected: ip_set',
+
+            'impact':
+              'An unmaintained kernel driver may represent a compatibility, security, or future support concern if the associated functionality is required.',
+
+            'diagnostic_commands':
+              [
+                "journalctl -k -b --no-pager | grep -i 'Unmaintained driver is detected: ip_set'",
+                'lsmod | grep -E "^ip_set|^ip_set_"',
+                'modinfo ip_set',
+                'uname -r'
+              ],
+
+            'root_cause_checks':
+              [
+                'Determine which service or firewall configuration uses ip_set.',
+                'Check whether the ip_set kernel module is currently loaded.',
+                'Identify whether the functionality is required by the server.',
+                'Review compatibility with the current RHEL kernel.'
+              ],
+
+            'remediation':
+              [
+                'Validate whether ip_set functionality is required.',
+                'Migrate to the supported mechanism if an approved replacement exists.',
+                'Do not remove the module without confirming that firewall or application functionality does not depend on it.'
+              ],
+
+            'recommendation':
+              'Determine which service or firewall configuration requires the module and verify compatibility with the current RHEL kernel.'
           }
         ]
       }}
-  when: "'Unmaintained driver is detected: ip_set' in hc_kernel_warnings.stdout"
+  when:
+    - "'Unmaintained driver is detected: ip_set' in hc_kernel_warnings.stdout"
 
-# ---------------------------------------------------------
-# VMware GRAPHICS
-# ---------------------------------------------------------
+
+# =========================================================
+# 6. VMware GRAPHICS
+# =========================================================
 
 - name: Assess VMware vmwgfx warning
   ansible.builtin.set_fact:
@@ -99,11 +284,48 @@
         hc_kernel_findings +
         [
           {
+            'category': 'kernel',
             'id': 'vmware_vmwgfx_memory',
-            'severity': 'WARNING',
-            'message': 'VMware vmwgfx reported guest graphics memory pressure.',
-            'evidence': 'vmwgfx: mob memory overflow',
-            'recommendation': 'Review VMware guest RAM and graphics configuration. If GUI/3D graphics are not required, consider whether the virtual graphics configuration can be simplified.'
+
+            'severity':
+              health_check.kernel.findings.vmware_vmwgfx_memory.severity
+              | default('WARNING'),
+
+            'message':
+              'VMware vmwgfx reported guest graphics memory pressure.',
+
+            'evidence':
+              'vmwgfx: mob memory overflow',
+
+            'impact':
+              'Guest graphics memory pressure may affect graphical workloads or indicate an unnecessary virtual graphics configuration.',
+
+            'diagnostic_commands':
+              [
+                "journalctl -k -b --no-pager | grep -i vmwgfx",
+                'lspci -nn | grep -i -E "vga|display|vmware"',
+                'free -h',
+                'uname -r'
+              ],
+
+            'root_cause_checks':
+              [
+                'Confirm that the server is running on VMware.',
+                'Determine whether GUI or 3D graphics functionality is required.',
+                'Review guest RAM allocation.',
+                'Review VMware virtual graphics configuration.',
+                'Determine whether the message is recurring.'
+              ],
+
+            'remediation':
+              [
+                'Review VMware guest RAM and graphics configuration.',
+                'If GUI or 3D graphics are not required, evaluate whether the virtual graphics configuration can be simplified.',
+                'Coordinate configuration changes with the virtualization team.'
+              ],
+
+            'recommendation':
+              'Review VMware guest RAM and graphics configuration. If GUI/3D graphics are not required, consider whether the virtual graphics configuration can be simplified.'
           }
         ]
       }}
@@ -112,10 +334,9 @@
     - server_profile.virtualization | default('unknown') | lower == 'vmware'
 
 
-
-# ---------------------------------------------------------
-# DEVICE MAPPER DEPRECATION
-# ---------------------------------------------------------
+# =========================================================
+# 7. DEVICE MAPPER DEPRECATION
+# =========================================================
 
 - name: Assess device-mapper deprecation
   ansible.builtin.set_fact:
@@ -124,19 +345,40 @@
         hc_kernel_findings +
         [
           {
+            'category': 'kernel',
             'id': 'device_mapper_deprecated',
-            'severity': 'INFO',
-            'message': 'Kernel reported a deprecated device-mapper capability attribute.',
-            'evidence': 'capability attribute has been deprecated',
-            'recommendation': 'Track this message for future kernel or storage configuration changes.'
+
+            'severity':
+              health_check.kernel.findings.device_mapper_deprecated.severity
+              | default('INFO'),
+
+            'message':
+              'Kernel reported a deprecated device-mapper capability attribute.',
+
+            'evidence':
+              'capability attribute has been deprecated',
+
+            'impact':
+              'This is primarily a compatibility and future-maintenance consideration rather than an immediate service-impacting condition.',
+
+            'diagnostic_commands': [],
+
+            'root_cause_checks': [],
+
+            'remediation': [],
+
+            'recommendation':
+              'Track this message for future kernel or storage configuration changes.'
           }
         ]
       }}
-  when: "'capability attribute has been deprecated' in hc_kernel_warnings.stdout"
+  when:
+    - "'capability attribute has been deprecated' in hc_kernel_warnings.stdout"
 
-# ---------------------------------------------------------
-# CPUID PERFORMANCE EVENTS
-# ---------------------------------------------------------
+
+# =========================================================
+# 8. CPUID PERFORMANCE EVENTS
+# =========================================================
 
 - name: Assess unavailable CPUID performance events
   ansible.builtin.set_fact:
@@ -145,19 +387,40 @@
         hc_kernel_findings +
         [
           {
+            'category': 'kernel',
             'id': 'cpuid_perf_events',
-            'severity': 'INFO',
-            'message': 'Some CPU performance monitoring events are unavailable.',
-            'evidence': 'CPUID marked event unavailable',
-            'recommendation': 'No immediate action unless CPU performance monitoring or profiling requires these hardware events.'
+
+            'severity':
+              health_check.kernel.findings.cpuid_perf_events.severity
+              | default('INFO'),
+
+            'message':
+              'Some CPU performance monitoring events are unavailable.',
+
+            'evidence':
+              'CPUID marked event unavailable',
+
+            'impact':
+              'Some hardware-level CPU performance monitoring or profiling events may not be available to monitoring tools.',
+
+            'diagnostic_commands': [],
+
+            'root_cause_checks': [],
+
+            'remediation': [],
+
+            'recommendation':
+              'No immediate action is required unless CPU performance monitoring or profiling depends on these hardware events.'
           }
         ]
       }}
-  when: "'CPUID marked event' in hc_kernel_warnings.stdout"
+  when:
+    - "'CPUID marked event' in hc_kernel_warnings.stdout"
 
-# ---------------------------------------------------------
-# IMA
-# ---------------------------------------------------------
+
+# =========================================================
+# 9. IMA
+# =========================================================
 
 - name: Assess IMA measurement message
   ansible.builtin.set_fact:
@@ -166,19 +429,40 @@
         hc_kernel_findings +
         [
           {
+            'category': 'kernel',
             'id': 'ima_measurement',
-            'severity': 'INFO',
-            'message': 'Kernel reported an IMA measurement configuration message.',
-            'evidence': 'Duplicate IMA measurements will not be recorded',
-            'recommendation': 'Review IMA configuration if integrity measurement is required by the server security baseline.'
+
+            'severity':
+              health_check.kernel.findings.ima_measurement.severity
+              | default('INFO'),
+
+            'message':
+              'Kernel reported an IMA measurement configuration message.',
+
+            'evidence':
+              'Duplicate IMA measurements will not be recorded',
+
+            'impact':
+              'This may indicate duplicate IMA measurement activity and is primarily relevant when integrity measurement is part of the security baseline.',
+
+            'diagnostic_commands': [],
+
+            'root_cause_checks': [],
+
+            'remediation': [],
+
+            'recommendation':
+              'Review IMA configuration if integrity measurement is required by the server security baseline.'
           }
         ]
       }}
-  when: "'Duplicate IMA measurements will not be recorded' in hc_kernel_warnings.stdout"
+  when:
+    - "'Duplicate IMA measurements will not be recorded' in hc_kernel_warnings.stdout"
 
-# ---------------------------------------------------------
-# DISPLAY RESULTS
-# ---------------------------------------------------------
+
+# =========================================================
+# 10. DISPLAY RESULTS
+# =========================================================
 
 - name: Display kernel findings
   ansible.builtin.debug:

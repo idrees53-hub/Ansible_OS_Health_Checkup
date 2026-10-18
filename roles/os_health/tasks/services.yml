@@ -1,13 +1,194 @@
 ---
- - name: Collect failed systemd services 
-   ansible.builtin.command: 
-    cmd: systemctl --failed --no-legend --no-pager 
-   register: hc_failed_services
-   changed_when: false
-   failed_when: false 
+# ============================================================
+# STC RHEL OS HEALTH CHECK
+# SERVICE HEALTH COLLECTION
+#
+# Purpose:
+#   Dynamically discover systemd services from the live server
+#   and build a structured service dataset.
+#
+# This file ONLY collects and structures service information.
+#
+# Assessment is performed separately by:
+#
+#   service_assessment.yml
+# ============================================================
 
- - name: Display failed Services 
-   ansible.builtin.debug:
-     var: hc_failed_services.stdout_lines
+
+# ============================================================
+# 1. COLLECT SERVICE INVENTORY
+# ============================================================
+
+- name: Collect all systemd service unit files
+  ansible.builtin.command:
+    cmd: systemctl list-unit-files --type=service --no-legend --no-pager
+  register: hc_service_unit_files
+  changed_when: false
+  failed_when: false
 
 
+# ============================================================
+# 2. COLLECT CURRENT SERVICE STATES
+# ============================================================
+
+- name: Collect current systemd service states
+  ansible.builtin.command:
+    cmd: systemctl list-units --type=service --all --no-legend --no-pager
+  register: hc_service_states
+  changed_when: false
+  failed_when: false
+
+
+# ============================================================
+# 3. COLLECT FAILED SERVICES
+# ============================================================
+
+- name: Collect failed systemd services
+  ansible.builtin.command:
+    cmd: systemctl --failed --type=service --no-legend --no-pager
+  register: hc_failed_services
+  changed_when: false
+  failed_when: false
+
+
+# ============================================================
+# 4. BUILD STRUCTURED SERVICE INVENTORY
+# ============================================================
+
+- name: Initialize structured service inventory
+  ansible.builtin.set_fact:
+    hc_service_inventory: []
+
+
+- name: Parse systemd service unit files
+  ansible.builtin.set_fact:
+    hc_service_inventory: >-
+      {{
+        hc_service_inventory +
+        [
+          {
+            'name': item.split()[0],
+            'unit_file_state': item.split()[1] | default('unknown'),
+            'vendor_preset': item.split()[2] | default('unknown')
+          }
+        ]
+      }}
+  loop: "{{ hc_service_unit_files.stdout_lines | default([]) }}"
+  when:
+    - item.split() | length >= 2
+    - item.split()[0] is match('.*\\.service$')
+
+
+# ============================================================
+# 5. BUILD STRUCTURED RUNTIME SERVICE DATA
+# ============================================================
+
+- name: Initialize structured runtime service data
+  ansible.builtin.set_fact:
+    hc_service_runtime: []
+
+- name: Parse systemd runtime service states
+  ansible.builtin.set_fact:
+    hc_service_runtime: >-
+      {{
+        hc_service_runtime +
+        [
+          {
+            'name': service_fields[0],
+            'load_state': service_fields[1] | default('unknown'),
+            'active_state': service_fields[2] | default('unknown'),
+            'sub_state': service_fields[3] | default('unknown'),
+            'description': (
+              service_fields[4:]
+              | join(' ')
+            )
+          }
+        ]
+      }}
+  vars:
+    service_line: >-
+      {{
+        item
+        | replace('● ', '')
+        | trim
+      }}
+    service_fields: "{{ service_line.split() }}"
+  loop: "{{ hc_service_states.stdout_lines | default([]) }}"
+  when:
+    - service_fields | length >= 4
+    - service_fields[0] is match('.*\\.service$')
+
+# ============================================================
+# 6. BUILD FAILED SERVICE LIST
+# ============================================================
+
+- name: Initialize failed service list
+  ansible.builtin.set_fact:
+    hc_failed_service_names: []
+
+
+- name: Extract failed service names
+  ansible.builtin.set_fact:
+    hc_failed_service_names: >-
+      {{
+        hc_failed_service_names +
+        [item.split()[0]]
+      }}
+  loop: "{{ hc_failed_services.stdout_lines | default([]) }}"
+  when:
+    - item.split() | length >= 1
+    - item.split()[0] is match('.*\\.service$')
+
+
+# ============================================================
+# 7. COMBINE SERVICE DATA
+# ============================================================
+
+- name: Build service health dataset
+  ansible.builtin.set_fact:
+    hc_service_data:
+      inventory: "{{ hc_service_inventory }}"
+      runtime: "{{ hc_service_runtime }}"
+      failed_services: "{{ hc_failed_service_names }}"
+
+
+# ============================================================
+# 8. SERVICE COLLECTION SUMMARY
+# ============================================================
+
+- name: Calculate service collection statistics
+  ansible.builtin.set_fact:
+    hc_service_inventory_count: >-
+      {{ hc_service_inventory | length }}
+
+    hc_service_runtime_count: >-
+      {{ hc_service_runtime | length }}
+
+    hc_failed_service_count: >-
+      {{ hc_failed_service_names | length }}
+
+
+# ============================================================
+# 9. DISPLAY SERVICE COLLECTION SUMMARY
+# ============================================================
+
+- name: Display service collection summary
+  ansible.builtin.debug:
+    msg:
+      - "=================================================="
+      - "SERVICE DATA COLLECTION"
+      - "=================================================="
+      - "Service Inventory: {{ hc_service_inventory_count }}"
+      - "Runtime Services: {{ hc_service_runtime_count }}"
+      - "Failed Services: {{ hc_failed_service_count }}"
+      - "=================================================="
+
+
+
+# ============================================================
+# 10. DISPLAY STRUCTURED SERVICE DATA
+# ============================================================
+
+- name: Display structured service health data
+  ansible.builtin.debug:
+    var: hc_service_data

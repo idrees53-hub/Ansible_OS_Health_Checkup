@@ -1,0 +1,411 @@
+---
+# ============================================================
+# STC RHEL OS HEALTH CHECK
+# LOG HEALTH ASSESSMENT
+#
+# Purpose:
+#   Analyze collected system and kernel logs and generate
+#   actionable health findings.
+#
+# Current policy:
+#
+#   High-confidence storage/I/O errors → CRITICAL
+#   Package/repository warnings       → WARNING
+#   Chrony rate limiting               → INFO
+#   Traditional logs unavailable       → WARNING
+#
+# Important:
+#   Diagnostic and remediation commands are recommendations
+#   only. They are NOT executed during this assessment.
+# ============================================================
+
+
+# ============================================================
+# 1. STORAGE / I/O ERRORS
+# ============================================================
+
+- name: Detect high-confidence storage and filesystem errors
+  ansible.builtin.set_fact:
+    hc_log_storage_errors: >-
+      {{
+        (
+          hc_log_data.journal.recent_errors
+          ~ '\n'
+          ~ hc_log_data.journal.current_boot_errors
+          ~ '\n'
+          ~ hc_log_data.kernel.recent_errors
+        )
+        | regex_findall(
+            '(?im)^.*(?:I/O error|blk_update_request|Buffer I/O error|XFS error|EXT4-fs error|read-only filesystem|device.*offline).*$'
+          )
+      }}
+
+
+- name: Create critical finding for storage errors
+  ansible.builtin.set_fact:
+    hc_log_findings: >-
+      {{
+        hc_log_findings | default([]) +
+        [
+          {
+            'category': 'logs',
+
+            'id': 'storage_io_error',
+
+            'severity': 'CRITICAL',
+
+            'message':
+              'High-confidence storage or filesystem errors were detected in system logs.',
+
+            'evidence':
+              hc_log_storage_errors | join('\n'),
+
+            'impact':
+              'Storage or filesystem errors may indicate disk, virtual disk, '
+              'storage-path, filesystem, controller, or underlying hardware '
+              'problems. Continued operation may result in application errors, '
+              'filesystem corruption, data loss, or service interruption.',
+
+            'diagnostic_commands':
+              [
+                'journalctl -p err..alert --since "7 days ago" --no-pager',
+                'journalctl -k -p err..alert --since "7 days ago" --no-pager',
+                'dmesg -T | grep -Ei "I/O error|blk_update_request|Buffer I/O error|XFS error|EXT4-fs error|read-only filesystem"',
+                'df -hT',
+                'lsblk -f',
+                'findmnt',
+                'multipath -ll',
+                'smartctl -a <device>'
+              ],
+
+            'root_cause_checks':
+              [
+                'Identify the affected disk, virtual disk, device, or filesystem from the log evidence.',
+                'Check whether the affected filesystem has entered read-only mode.',
+                'Check for repeated I/O errors involving the same device or storage path.',
+                'Check kernel messages for disk, SCSI, multipath, controller, or filesystem errors.',
+                'Verify filesystem health and available capacity.',
+                'For physical servers, check disk health and storage-controller status.',
+                'For virtual machines, check the underlying datastore, virtual disk, and hypervisor storage path.',
+                'Check whether the issue correlates with recent storage, kernel, or infrastructure changes.'
+              ],
+
+            'remediation':
+              [
+                'Escalate confirmed hardware or storage-path failures to the appropriate infrastructure or storage team.',
+                'Repair or replace faulty storage components according to the approved procedure.',
+                'Repair the affected filesystem using the appropriate RHEL filesystem recovery procedure during an approved maintenance window.',
+                'Restore data from backup when corruption or data loss is confirmed.',
+                'Verify filesystem and application health after remediation.'
+              ],
+
+            'recommendation':
+              'Investigate the affected storage device, filesystem, kernel I/O errors, '
+              'and underlying hardware or virtual disk condition immediately. '
+              'Escalate to the storage or virtualization team when required.'
+          }
+        ]
+      }}
+  when:
+    - hc_log_storage_errors | length > 0
+
+
+# ============================================================
+# 2. PACKAGE / REPOSITORY WARNINGS
+# ============================================================
+
+- name: Detect repeated package or repository warnings
+  ansible.builtin.set_fact:
+    hc_log_package_warnings: >-
+      {{
+        hc_log_data.journal.recent_warnings
+        | regex_findall(
+            '(?im)^.*(?:Cannot update read-only repo|Skipping refresh of media|PackageKit.*assertion).*$'
+          )
+      }}
+
+
+- name: Create warning finding for package/repository issues
+  ansible.builtin.set_fact:
+    hc_log_findings: >-
+      {{
+        hc_log_findings | default([]) +
+        [
+          {
+            'category': 'logs',
+
+            'id': 'package_repository_warning',
+
+            'severity': 'WARNING',
+
+            'message':
+              'Repeated package-management or repository-related warnings were detected.',
+
+            'evidence':
+              hc_log_package_warnings | join('\n'),
+
+            'impact':
+              'Repository or package-management problems may prevent successful '
+              'package updates, security patching, metadata refreshes, or software '
+              'installation. Persistent repository issues can leave the server '
+              'without current security and bug-fix updates.',
+
+            'diagnostic_commands':
+              [
+                'dnf repolist',
+                'dnf repolist --enabled',
+                'dnf check-update',
+                'dnf updateinfo summary',
+                'subscription-manager status',
+                'subscription-manager repos --list-enabled',
+                'journalctl -u packagekit --since "7 days ago" --no-pager'
+              ],
+
+            'root_cause_checks':
+              [
+                'Identify which repository is generating the warning.',
+                'Check repository configuration and enabled repository definitions.',
+                'Verify Red Hat subscription and entitlement status.',
+                'Check repository network connectivity and DNS resolution.',
+                'Check whether a repository is intentionally configured as read-only or disabled.',
+                'Review PackageKit activity and recent package-management events.',
+                'Determine whether the warning is recurring or associated with a temporary repository condition.'
+              ],
+
+            'remediation':
+              [
+                'Correct invalid or stale repository configuration.',
+                'Restore required repository access or subscription entitlement.',
+                'Disable obsolete repository definitions through the approved configuration process.',
+                'Correct PackageKit or package-management configuration when required.',
+                'Validate successful repository metadata refresh after remediation.',
+                'Confirm that normal package and security update operations work correctly.'
+              ],
+
+            'recommendation':
+              'Review repository configuration, package-management services, '
+              'and Red Hat subscription or entitlement configuration. '
+              'Verify that required repositories can successfully refresh metadata '
+              'and support normal package update operations.'
+          }
+        ]
+      }}
+  when:
+    - hc_log_package_warnings | length > 0
+
+
+# ============================================================
+# 3. CHRONY RATE-LIMIT MESSAGES
+# ============================================================
+
+- name: Detect chrony rate-limit messages
+  ansible.builtin.set_fact:
+    hc_log_chrony_rate_limit: >-
+      {{
+        hc_log_data.journal.recent_warnings
+        | regex_findall(
+            '(?im)^.*Received KoD RATE.*$'
+          )
+      }}
+
+
+- name: Create informational finding for chrony rate limiting
+  ansible.builtin.set_fact:
+    hc_log_findings: >-
+      {{
+        hc_log_findings | default([]) +
+        [
+          {
+            'category': 'logs',
+
+            'id': 'chrony_rate_limit',
+
+            'severity': 'INFO',
+
+            'message':
+              'Chrony received a rate-limit response from an NTP source.',
+
+            'evidence':
+              hc_log_chrony_rate_limit | join('\n'),
+
+            'impact':
+              'Repeated NTP rate-limit responses may affect time synchronization '
+              'if the configured time source continues to reject requests. '
+              'Time synchronization problems can affect authentication, logging, '
+              'certificates, distributed applications, and scheduled operations.',
+
+            'diagnostic_commands':
+              [
+                'chronyc tracking',
+                'chronyc sources -v',
+                'chronyc sourcestats -v',
+                'chronyc activity',
+                'timedatectl status'
+              ],
+
+            'root_cause_checks':
+              [
+                'Check which NTP source is returning the rate-limit response.',
+                'Verify that the configured NTP sources are approved and reachable.',
+                'Check whether the server is generating excessive NTP requests.',
+                'Verify chrony configuration and configured server or pool entries.',
+                'Check current synchronization state, stratum, offset, and source reachability.',
+                'Determine whether the message is isolated or recurring.'
+              ],
+
+            'remediation':
+              [
+                'Review and correct chrony NTP source configuration if required.',
+                'Replace unsuitable or unreliable NTP sources with approved sources.',
+                'Correct chrony configuration if excessive requests are being generated.',
+                'Verify successful synchronization after configuration changes.'
+              ],
+
+            'recommendation':
+              'Review NTP source configuration if rate-limit messages occur repeatedly. '
+              'Verify that the configured NTP sources are appropriate and that '
+              'chrony remains synchronized.'
+          }
+        ]
+      }}
+  when:
+    - hc_log_chrony_rate_limit | length > 0
+
+
+# ============================================================
+# 4. LOG AVAILABILITY
+# ============================================================
+
+- name: Check availability of traditional system logs
+  ansible.builtin.set_fact:
+    hc_log_available_count: >-
+      {{
+        (
+          (hc_log_data.traditional_logs.messages | default('') | length > 0)
+          | int
+        )
+        +
+        (
+          (hc_log_data.traditional_logs.secure | default('') | length > 0)
+          | int
+        )
+      }}
+
+
+- name: Create warning when expected traditional logs are unavailable
+  ansible.builtin.set_fact:
+    hc_log_findings: >-
+      {{
+        hc_log_findings | default([]) +
+        [
+          {
+            'category': 'logs',
+
+            'id': 'traditional_logs_unavailable',
+
+            'severity': 'WARNING',
+
+            'message':
+              'Expected traditional system log data was unavailable.',
+
+            'evidence':
+              'One or more expected traditional log sources could not be collected.',
+
+            'impact':
+              'Missing traditional log data can reduce troubleshooting, '
+              'security auditing, and operational visibility. It may also '
+              'indicate logging configuration, log rotation, filesystem, '
+              'or service issues.',
+
+            'diagnostic_commands':
+              [
+                'ls -lh /var/log/messages /var/log/secure /var/log/cron /var/log/dnf.log /var/log/audit/audit.log',
+                'systemctl status rsyslog --no-pager',
+                'journalctl --disk-usage',
+                'df -hT /var/log',
+                'grep -Ei "rotate|missingok|rsyslog" /etc/logrotate.conf /etc/logrotate.d/*'
+              ],
+
+            'root_cause_checks':
+              [
+                'Determine which expected log files are missing or empty.',
+                'Check whether rsyslog is installed and running.',
+                'Verify logrotate configuration and recent rotation activity.',
+                'Check filesystem capacity for the /var/log filesystem.',
+                'Verify whether the current RHEL configuration intentionally relies on journald instead of traditional log files.',
+                'Check file permissions and ownership on the affected log paths.'
+              ],
+
+            'remediation':
+              [
+                'Restore or correct rsyslog configuration when traditional logging is required.',
+                'Correct logrotate configuration when log rotation is preventing expected log creation.',
+                'Resolve filesystem capacity or permission problems affecting log creation.',
+                'Document environments where journald is intentionally used instead of traditional log files.',
+                'Verify that required system and security logging is available after remediation.'
+              ],
+
+            'recommendation':
+              'Verify rsyslog configuration, log rotation, filesystem availability, '
+              'permissions, and whether the required traditional log files are '
+              'expected on this RHEL system.'
+          }
+        ]
+      }}
+  when:
+    - hc_log_available_count | int == 0
+
+
+
+# 5. INITIALIZE LOG FINDINGS
+# ============================================================
+
+- name: Initialize log findings
+  ansible.builtin.set_fact:
+    hc_log_findings: "{{ hc_log_findings | default([]) }}"
+
+
+# ============================================================
+# 6. CALCULATE LOG HEALTH
+# ============================================================
+
+- name: Calculate log health
+  ansible.builtin.set_fact:
+    hc_log_health: >-
+      {{
+        'CRITICAL'
+        if (
+          hc_log_findings
+          | selectattr('severity', 'equalto', 'CRITICAL')
+          | list
+          | length
+        ) > 0
+        else
+        'WARNING'
+        if (
+          hc_log_findings
+          | selectattr('severity', 'equalto', 'WARNING')
+          | list
+          | length
+        ) > 0
+        else
+        'OK'
+      }}
+
+
+# ============================================================
+# 7. DISPLAY LOG ASSESSMENT SUMMARY
+# ============================================================
+
+- name: Display log assessment summary
+  ansible.builtin.debug:
+    msg:
+      - "=========================================="
+      - "LOG HEALTH ASSESSMENT"
+      - "=========================================="
+      - "Log Health: {{ hc_log_health }}"
+      - "CRITICAL: {{ hc_log_findings | selectattr('severity', 'equalto', 'CRITICAL') | list | length }}"
+      - "WARNING: {{ hc_log_findings | selectattr('severity', 'equalto', 'WARNING') | list | length }}"
+      - "INFO: {{ hc_log_findings | selectattr('severity', 'equalto', 'INFO') | list | length }}"
+      - "=========================================="
+      - "{{ hc_log_findings }}"

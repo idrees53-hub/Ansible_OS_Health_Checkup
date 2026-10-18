@@ -41,7 +41,9 @@
         hc_cpu_findings +
         [
           {
+            'category': 'cpu',
             'id': 'cpu_utilization',
+
             'severity':
               'CRITICAL'
               if (hc_cpu_metrics.utilization_percent | float)
@@ -67,8 +69,48 @@
               ~ (hc_cpu_metrics.idle_percent | float | round(2) | string)
               ~ '%.',
 
+            'impact':
+              'Sustained high CPU utilization may cause application response degradation, increased processing latency, and resource contention.'
+              if (hc_cpu_metrics.utilization_percent | float)
+                 >= (health_check.cpu.utilization.warning_percent | float)
+              else
+              'No immediate CPU capacity concern was identified from the current sample.',
+
+            'diagnostic_commands':
+              [
+                'top -b -n 1 | head -n 20',
+                'ps -eo pid,ppid,cmd,%mem,%cpu --sort=-%cpu | head -n 6',
+                'uptime',
+                'vmstat 1 5'
+              ]
+              if (hc_cpu_metrics.utilization_percent | float)
+                 >= (health_check.cpu.utilization.warning_percent | float)
+              else [],
+
+            'root_cause_checks':
+              [
+                'Identify the processes consuming the most CPU.',
+                'Determine whether high CPU usage is caused by an expected application workload.',
+                'Check whether CPU load is sustained or temporary.',
+                'Review CPU steal time when the server is virtualized.'
+              ]
+              if (hc_cpu_metrics.utilization_percent | float)
+                 >= (health_check.cpu.utilization.warning_percent | float)
+              else [],
+
+            'remediation':
+              [
+                'Investigate the top CPU-consuming processes before restarting or terminating any process.',
+                'Review application workload and scheduled jobs.',
+                'Tune the affected application or workload if sustained CPU consumption is expected.',
+                'For persistent capacity pressure, evaluate CPU allocation or workload distribution.'
+              ]
+              if (hc_cpu_metrics.utilization_percent | float)
+                 >= (health_check.cpu.utilization.warning_percent | float)
+              else [],
+
             'recommendation':
-              'Review CPU-consuming processes and application workload if elevated CPU utilization persists.'
+              'Investigate the top CPU-consuming processes and application workload if elevated CPU utilization persists.'
           }
         ]
       }}
@@ -76,7 +118,6 @@
     - hc_cpu_metrics is defined
     - hc_cpu_metrics.utilization_percent is defined
     - hc_cpu_metrics.utilization_percent != 'NOT_AVAILABLE'
-
 
 # ============================================================
 # 3. NORMALIZED CPU LOAD
@@ -89,7 +130,9 @@
         hc_cpu_findings +
         [
           {
+            'category': 'cpu',
             'id': 'cpu_load',
+
             'severity':
               'CRITICAL'
               if (hc_cpu_metrics.normalized_load_1m | float)
@@ -117,6 +160,45 @@
               ~ (hc_cpu_metrics.normalized_load_1m | float | round(2) | string)
               ~ '.',
 
+            'impact':
+              'Sustained high normalized load may indicate CPU saturation or processes waiting for CPU resources.'
+              if (hc_cpu_metrics.normalized_load_1m | float)
+                 >= (health_check.cpu.load.warning_ratio | float)
+              else
+              'Current normalized CPU load is within the configured threshold.',
+
+            'diagnostic_commands':
+              [
+                'uptime',
+                'top -b -n 1 | head -n 20',
+                'ps -eo pid,ppid,cmd,%mem,%cpu --sort=-%cpu | head -n 6',
+                'vmstat 1 5'
+              ]
+              if (hc_cpu_metrics.normalized_load_1m | float)
+                 >= (health_check.cpu.load.warning_ratio | float)
+              else [],
+
+            'root_cause_checks':
+              [
+                'Compare 1-minute, 5-minute, and 15-minute load averages.',
+                'Identify processes consuming CPU resources.',
+                'Check whether the load is sustained or a short-term spike.',
+                'Compare normalized load with the number of logical CPUs.'
+              ]
+              if (hc_cpu_metrics.normalized_load_1m | float)
+                 >= (health_check.cpu.load.warning_ratio | float)
+              else [],
+
+            'remediation':
+              [
+                'Investigate the processes contributing to sustained system load.',
+                'Review scheduled jobs and application workloads.',
+                'Tune or redistribute workloads when CPU saturation is persistent.'
+              ]
+              if (hc_cpu_metrics.normalized_load_1m | float)
+                 >= (health_check.cpu.load.warning_ratio | float)
+              else [],
+
             'recommendation':
               'Review workload and top CPU-consuming processes if normalized CPU load remains elevated.'
           }
@@ -128,13 +210,9 @@
     - hc_cpu_metrics.normalized_load_1m != 'NOT_AVAILABLE'
 
 
+
 # ============================================================
 # 4. CPU STEAL TIME
-#
-# Particularly important for virtual machines.
-#
-# High steal means the guest wanted CPU time but the
-# hypervisor was unable to provide it immediately.
 # ============================================================
 
 - name: Assess CPU steal time
@@ -144,7 +222,9 @@
         hc_cpu_findings +
         [
           {
+            'category': 'cpu',
             'id': 'cpu_steal',
+
             'severity':
               'CRITICAL'
               if (hc_cpu_metrics.steal_percent | float)
@@ -170,6 +250,44 @@
               ~ (hc_cpu_inventory.hypervisor | default('NOT_AVAILABLE') | string)
               ~ '.',
 
+            'impact':
+              'High CPU steal indicates that the virtual machine is waiting for CPU resources from the hypervisor, which can reduce application performance.'
+              if (hc_cpu_metrics.steal_percent | float)
+                 >= (health_check.cpu.steal.warning_percent | float)
+              else
+              'No significant hypervisor CPU contention was detected during the sample.',
+
+            'diagnostic_commands':
+              [
+                'top -b -n 1 | head -n 20',
+                'vmstat 1 5',
+                'lscpu'
+              ]
+              if (hc_cpu_metrics.steal_percent | float)
+                 >= (health_check.cpu.steal.warning_percent | float)
+              else [],
+
+            'root_cause_checks':
+              [
+                'Confirm that the server is virtualized and identify the hypervisor.',
+                'Check whether elevated steal time persists across multiple samples.',
+                'Review VM CPU allocation and host-level CPU contention.',
+                'Check for CPU overcommitment on the virtualization host.'
+              ]
+              if (hc_cpu_metrics.steal_percent | float)
+                 >= (health_check.cpu.steal.warning_percent | float)
+              else [],
+
+            'remediation':
+              [
+                'Review VM CPU allocation with the virtualization team.',
+                'Investigate host-level CPU contention.',
+                'Consider adjusting VM CPU resources if sustained contention is confirmed.'
+              ]
+              if (hc_cpu_metrics.steal_percent | float)
+                 >= (health_check.cpu.steal.warning_percent | float)
+              else [],
+
             'recommendation':
               'For virtual machines, review hypervisor CPU contention and host-level CPU allocation if elevated steal time persists.'
           }
@@ -183,10 +301,6 @@
 
 # ============================================================
 # 5. CPU I/O WAIT
-#
-# High I/O wait can indicate that processes are waiting for
-# storage or other I/O operations rather than actively using
-# CPU.
 # ============================================================
 
 - name: Assess CPU I/O wait
@@ -196,7 +310,9 @@
         hc_cpu_findings +
         [
           {
+            'category': 'cpu',
             'id': 'cpu_iowait',
+
             'severity':
               'CRITICAL'
               if (hc_cpu_metrics.iowait_percent | float)
@@ -220,6 +336,45 @@
               ~ (hc_cpu_metrics.iowait_percent | float | round(2) | string)
               ~ '%.',
 
+            'impact':
+              'High I/O wait indicates that CPU time is being spent waiting for I/O operations, which may indicate storage latency or I/O-intensive workloads.'
+              if (hc_cpu_metrics.iowait_percent | float)
+                 >= (health_check.cpu.iowait.warning_percent | float)
+              else
+              'No significant I/O wait was detected during the CPU sampling interval.',
+
+            'diagnostic_commands':
+              [
+                'vmstat 1 5',
+                'iostat -xz 1 5',
+                'df -h',
+                'ps -eo pid,ppid,cmd,%mem,%cpu --sort=-%cpu | head -n 6'
+              ]
+              if (hc_cpu_metrics.iowait_percent | float)
+                 >= (health_check.cpu.iowait.warning_percent | float)
+              else [],
+
+            'root_cause_checks':
+              [
+                'Check storage latency and device utilization.',
+                'Identify processes performing intensive I/O.',
+                'Check filesystem capacity and mount health.',
+                'Review kernel logs for storage or filesystem errors.'
+              ]
+              if (hc_cpu_metrics.iowait_percent | float)
+                 >= (health_check.cpu.iowait.warning_percent | float)
+              else [],
+
+            'remediation':
+              [
+                'Investigate the affected storage device or workload.',
+                'Reduce unnecessary I/O-intensive operations where possible.',
+                'Escalate persistent storage latency to the storage or virtualization team.'
+              ]
+              if (hc_cpu_metrics.iowait_percent | float)
+                 >= (health_check.cpu.iowait.warning_percent | float)
+              else [],
+
             'recommendation':
               'Review storage latency, disk activity, and I/O-intensive processes if elevated I/O wait persists.'
           }
@@ -229,7 +384,6 @@
     - hc_cpu_metrics is defined
     - hc_cpu_metrics.iowait_percent is defined
     - hc_cpu_metrics.iowait_percent != 'NOT_AVAILABLE'
-
 
 # ============================================================
 # 6. DETERMINE OVERALL CPU HEALTH

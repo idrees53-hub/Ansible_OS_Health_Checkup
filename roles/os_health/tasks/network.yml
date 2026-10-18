@@ -1,0 +1,212 @@
+---
+# =========================================================
+# STC RHEL OS HEALTH CHECK
+# NETWORK DATA COLLECTION
+#
+# Collection only.
+# No health decisions are made here.
+# =========================================================
+
+# ---------------------------------------------------------
+# NETWORK INTERFACE INFORMATION
+# ---------------------------------------------------------
+
+- name: Collect network interface information
+  ansible.builtin.command:
+    cmd: ip -br addr
+  register: hc_network_interfaces
+  changed_when: false
+  failed_when: false
+
+# ---------------------------------------------------------
+# NETWORK LINK STATISTICS
+# ---------------------------------------------------------
+
+- name: Collect network interface statistics
+  ansible.builtin.command:
+    cmd: ip -s link
+  register: hc_network_link_stats
+  changed_when: false
+  failed_when: false
+
+# ---------------------------------------------------------
+# ROUTING INFORMATION
+# ---------------------------------------------------------
+
+- name: Collect routing table
+  ansible.builtin.command:
+    cmd: ip route
+  register: hc_network_routes
+  changed_when: false
+  failed_when: false
+
+# ---------------------------------------------------------
+# DEFAULT ROUTE
+# ---------------------------------------------------------
+
+- name: Collect default route
+  ansible.builtin.command:
+    cmd: ip route show default
+  register: hc_network_default_route
+  changed_when: false
+  failed_when: false
+
+# ---------------------------------------------------------
+# NETWORKMANAGER
+# ---------------------------------------------------------
+
+- name: Collect NetworkManager service state
+  ansible.builtin.command:
+    cmd: systemctl is-active NetworkManager
+  register: hc_networkmanager_state
+  changed_when: false
+  failed_when: false
+
+# ---------------------------------------------------------
+# NETWORKMANAGER DEVICE STATUS
+# ---------------------------------------------------------
+
+- name: Collect NetworkManager device status
+  ansible.builtin.command:
+    cmd: nmcli device status
+  register: hc_nmcli_devices
+  changed_when: false
+  failed_when: false
+
+# ---------------------------------------------------------
+# NETWORK INTERFACE STATISTICS
+# ---------------------------------------------------------
+
+- name: Get network interface list
+  ansible.builtin.command:
+    cmd: ip -o link show
+  register: hc_network_interface_list
+  changed_when: false
+  failed_when: false
+
+- name: Build network interface names
+  ansible.builtin.set_fact:
+    hc_network_interface_names: >-
+      {{
+        hc_network_interface_list.stdout_lines
+        | default([])
+        | map('regex_replace', '^([0-9]+): ([^:]+):.*$', '\2')
+        | map('regex_replace', '@.*$', '')
+        | reject('equalto', 'lo')
+        | list
+      }}
+
+- name: Collect network interface statistics
+  ansible.builtin.shell: |
+    printf '%s rx_errors=%s rx_dropped=%s tx_errors=%s tx_dropped=%s\n' \
+      "{{ item }}" \
+      "$(cat /sys/class/net/{{ item }}/statistics/rx_errors)" \
+      "$(cat /sys/class/net/{{ item }}/statistics/rx_dropped)" \
+      "$(cat /sys/class/net/{{ item }}/statistics/tx_errors)" \
+      "$(cat /sys/class/net/{{ item }}/statistics/tx_dropped)"
+  args:
+    executable: /bin/bash
+  loop: "{{ hc_network_interface_names | default([]) }}"
+  register: hc_network_interface_statistics
+  changed_when: false
+  failed_when: false
+
+- name: Build structured network interface statistics
+  ansible.builtin.set_fact:
+    hc_network_interface_stats: >-
+      {{
+        hc_network_interface_stats | default([]) +
+        [
+          {
+            'interface': item.item,
+            'rx_errors': (
+              item.stdout
+              | regex_search('rx_errors=([0-9]+)', '\1')
+              | first
+              | default('0')
+            ) | int,
+            'rx_dropped': (
+              item.stdout
+              | regex_search('rx_dropped=([0-9]+)', '\1')
+              | first
+              | default('0')
+            ) | int,
+            'tx_errors': (
+              item.stdout
+              | regex_search('tx_errors=([0-9]+)', '\1')
+              | first
+              | default('0')
+            ) | int,
+            'tx_dropped': (
+              item.stdout
+              | regex_search('tx_dropped=([0-9]+)', '\1')
+              | first
+              | default('0')
+            ) | int
+          }
+        ]
+      }}
+  loop: "{{ hc_network_interface_statistics.results | default([]) }}"
+
+
+
+
+
+# ---------------------------------------------------------
+# DNS CONFIGURATION
+# ---------------------------------------------------------
+
+- name: Collect DNS configuration
+  ansible.builtin.command:
+    cmd: cat /etc/resolv.conf
+  register: hc_network_dns
+  changed_when: false
+  failed_when: false
+
+# ---------------------------------------------------------
+# STRUCTURED NETWORK DATA
+# ---------------------------------------------------------
+
+- name: Build structured network data
+  ansible.builtin.set_fact:
+    hc_network_data:
+
+      interfaces:
+        raw: "{{ hc_network_interfaces.stdout | default('') }}"
+        statistics: "{{ hc_network_interface_stats | default([]) }}"
+
+      link_statistics:
+        raw: "{{ hc_network_link_stats.stdout | default('') }}"
+
+      routes:
+        raw: "{{ hc_network_routes.stdout | default('') }}"
+
+      default_route:
+        raw: "{{ hc_network_default_route.stdout | default('') }}"
+
+      networkmanager:
+        state: "{{ hc_networkmanager_state.stdout | default('unknown') | trim }}"
+
+      devices:
+        raw: "{{ hc_nmcli_devices.stdout | default('') }}"
+
+      dns:
+        raw: "{{ hc_network_dns.stdout | default('') }}"
+
+# ---------------------------------------------------------
+# COLLECTION SUMMARY
+# ---------------------------------------------------------
+
+- name: Display network collection summary
+  ansible.builtin.debug:
+    msg:
+      - "=================================================="
+      - "NETWORK DATA COLLECTION"
+      - "=================================================="
+      - "NetworkManager: {{ hc_network_data.networkmanager.state }}"
+      - "Default Route: {{ 'Present' if hc_network_data.default_route.raw | length > 0 else 'Not detected' }}"
+      - "Interface data collected: {{ 'Yes' if hc_network_data.interfaces.raw | length > 0 else 'No' }}"
+      - "Link statistics collected: {{ 'Yes' if hc_network_data.link_statistics.raw | length > 0 else 'No' }}"
+      - "Device information collected: {{ 'Yes' if hc_network_data.devices.raw | length > 0 else 'No' }}"
+      - "DNS information collected: {{ 'Yes' if hc_network_data.dns.raw | length > 0 else 'No' }}"
+      - "=================================================="

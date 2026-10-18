@@ -1,54 +1,238 @@
 ---
- - name: Collect server identity 
-   ansible.builtin.include_tasks:
-     file: identity.yml 
+- name: Collect server identity
+  ansible.builtin.include_tasks:
+    file: identity.yml
+    apply:
+      tags:
+        - identity
+  tags:
+    - identity
 
- - name: Collect log and journal information 
-   ansible.builtin.include_tasks:
-     file: logs.yml 
+- name: Collect log and journal information
+  ansible.builtin.include_tasks:
+    file: logs.yml
+    apply:
+      tags:
+        - logs
+  tags:
+    - logs
 
- - name: Collect Kernel information 
-   ansible.builtin.include_tasks:
-     file: kernel.yml 
+- name: Assess log health
+  ansible.builtin.include_tasks:
+    file: logs_assessment.yml
+    apply:
+      tags:
+        - logs
+  tags:
+    - logs
 
- - name: Collect Service Information 
-   ansible.builtin.include_tasks:
-     file: services.yml 
+- name: Collect Kernel information
+  ansible.builtin.include_tasks:
+    file: kernel.yml
+    apply:
+      tags:
+        - kernel
+  tags:
+    - kernel
 
- - name: Collect filesystem information 
-   ansible.builtin.include_tasks:
-     file: filesystem.yml
+- name: Assess kernel health
+  ansible.builtin.include_tasks:
+    file: kernel_assessment.yml
+    apply:
+      tags:
+        - kernel
+  tags:
+    - kernel
 
- - name: Collect CPU information
-   ansible.builtin.include_tasks:
-     file: cpu.yml
+- name: Collect Service Information
+  ansible.builtin.include_tasks:
+    file: services.yml
+    apply:
+      tags:
+        - services
+  tags:
+    - services
 
- - name: Collect memory information 
-   ansible.builtin.include_tasks: 
-     file: memory.yml 
+- name: Assess service health
+  ansible.builtin.include_tasks:
+    file: service_assessment.yml
+    apply:
+      tags:
+        - services
+  tags:
+    - services
 
- - name: Assess CPU health
-   ansible.builtin.include_tasks:
-     file: cpu_assessment.yml
+- name: Collect filesystem information
+  ansible.builtin.include_tasks:
+    file: filesystem.yml
+    apply:
+      tags:
+        - filesystem
+  tags:
+    - filesystem
 
- - name: Assess memory health 
-   ansible.builtin.include_tasks:
-     file: memory_assessment.yml 
+- name: Assess filesystem health
+  ansible.builtin.include_tasks:
+    file: filesystem_assessment.yml
+    apply:
+      tags:
+        - filesystem
+  tags:
+    - filesystem
 
- - name: Assess kernel health
-   ansible.builtin.include_tasks:
-     file: kernel_assessment.yml
+- name: Collect CPU information
+  ansible.builtin.include_tasks:
+    file: cpu.yml
+    apply:
+      tags:
+        - cpu
+  tags:
+    - cpu
 
- - name: Asses collected health data 
-   ansible.builtin.include_tasks:
-     file: assessment.yml 
+- name: Assess CPU health
+  ansible.builtin.include_tasks:
+    file: cpu_assessment.yml
+    apply:
+      tags:
+        - cpu
+  tags:
+    - cpu
 
+- name: Collect memory information
+  ansible.builtin.include_tasks:
+    file: memory.yml
+    apply:
+      tags:
+        - memory
+  tags:
+    - memory
 
+- name: Assess memory health
+  ansible.builtin.include_tasks:
+    file: memory_assessment.yml
+    apply:
+      tags:
+        - memory
+  tags:
+    - memory
 
-#------------------------------------
-#Final Overall Aggregation
-#------------------------------------
+- name: Collect security information
+  ansible.builtin.include_tasks:
+    file: security.yml
+    apply:
+      tags:
+        - security
+  tags:
+    - security
 
- - name: Calculate overall server health
-   ansible.builtin.include_tasks:
-     file: overall_assessment.yml 
+- name: Assess security health
+  ansible.builtin.include_tasks:
+    file: security_assessment.yml
+    apply:
+      tags:
+        - security
+  tags:
+    - security
+
+- name: Collect network information
+  ansible.builtin.include_tasks:
+    file: network.yml
+    apply:
+      tags:
+        - network
+  tags:
+    - network
+
+- name: Assess network health
+  ansible.builtin.include_tasks:
+    file: network_assessment.yml
+    apply:
+      tags:
+        - network
+  tags:
+    - network
+
+- name: Collect NTP information
+  ansible.builtin.include_tasks:
+    file: ntp.yml
+    apply:
+      tags:
+        - ntp
+  tags:
+    - ntp
+
+- name: Assess NTP health
+  ansible.builtin.include_tasks:
+    file: ntp_assessment.yml
+    apply:
+      tags:
+        - ntp
+  tags:
+    - ntp
+
+- name: Collect OS version information
+  ansible.builtin.include_tasks:
+    file: os_version.yml
+    apply:
+      tags:
+        - os_version 
+  tags:
+    - os_version
+
+- name: Assess OS version
+  ansible.builtin.include_tasks:
+    file: os_version_assessment.yml
+    apply:
+      tags:
+        - os_version
+  tags:
+    - os_version
+
+- name: Collect uptime information
+  ansible.builtin.include_tasks:
+    file: uptime.yml
+    apply:
+      tags:
+        - uptime
+  tags:
+    - uptime
+
+- name: Assess uptime
+  ansible.builtin.include_tasks:
+    file: uptime_assessment.yml
+    apply:
+      tags:
+        - uptime
+  tags:
+    - uptime
+
+- name: Collect SAR information
+  ansible.builtin.include_tasks:
+    file: sar.yml
+    apply:
+      tags:
+        sar
+  tags:
+    - sar
+
+- name: Assess SAR data
+  ansible.builtin.include_tasks:
+    file: sar_assessment.yml
+    apply:
+      tags:
+        - sar
+  tags:
+    - sar
+
+- name: Calculate overall server health
+  ansible.builtin.include_tasks:
+    file: overall_assessment.yml
+    apply:
+      tags: 
+        - overall
+  tags:
+    - overall
+
+- name: Genrate structures JSON report 
+  ansible.builtin.include_tasks:
+    file: reporting.yml 

@@ -1,0 +1,497 @@
+---
+# =========================================================
+# STC RHEL OS HEALTH CHECK
+# NTP / CHRONY HEALTH ASSESSMENT
+#
+# Collection is performed in ntp.yml.
+# This file evaluates the collected NTP/Chrony data.
+#
+# Assessment only.
+# Diagnostic commands are recommendations only and
+# are NOT executed by this assessment.
+# =========================================================
+
+
+# =========================================================
+# INITIALIZATION
+# =========================================================
+
+- name: Initialize NTP health findings
+  ansible.builtin.set_fact:
+    hc_ntp_findings: []
+
+
+# =========================================================
+# CHRONY SERVICE
+# =========================================================
+
+- name: Assess Chrony service
+  ansible.builtin.set_fact:
+    hc_ntp_findings: >-
+      {{
+        hc_ntp_findings +
+        [
+          {
+            'id': 'chrony_service_active',
+            'category': 'NTP',
+            'severity': 'OK',
+            'message': 'Chrony service is active.',
+            'evidence': hc_ntp_data.chrony.service_state,
+            'impact': 'The Chrony service is running and available to manage system time synchronization.',
+            'diagnostic_commands': [],
+            'root_cause_checks': [],
+            'remediation': [],
+            'recommendation': 'No immediate action required. Continue routine monitoring.'
+          }
+        ]
+      }}
+  when:
+    - hc_ntp_data.chrony.service_state == 'active'
+
+
+- name: Assess Chrony service inactive
+  ansible.builtin.set_fact:
+    hc_ntp_findings: >-
+      {{
+        hc_ntp_findings +
+        [
+          {
+            'id': 'chrony_service_inactive',
+            'category': 'NTP',
+            'severity': 'CRITICAL',
+            'message': 'Chrony service is not active.',
+            'evidence': hc_ntp_data.chrony.service_state,
+            'impact': 'The server may not be able to maintain accurate system time. Time-sensitive applications, authentication, logging, certificates, and distributed systems may be affected.',
+            'diagnostic_commands': [
+              'systemctl status chronyd',
+              'systemctl is-enabled chronyd',
+              'journalctl -u chronyd --since "24 hours ago"',
+              'chronyc tracking'
+            ],
+            'root_cause_checks': [
+              'Check whether chronyd failed to start.',
+              'Review recent chronyd journal messages.',
+              'Verify the Chrony configuration.',
+              'Check whether the service was intentionally disabled.',
+              'Verify that the configured NTP sources are reachable.'
+            ],
+            'remediation': [
+              'Restore chronyd to the approved service state.',
+              'Correct any Chrony configuration or startup errors.',
+              'Validate NTP synchronization after restoring the service.'
+            ],
+            'recommendation': 'Investigate and restore the Chrony service because accurate time synchronization is required for reliable system operation.'
+          }
+        ]
+      }}
+  when:
+    - hc_ntp_data.chrony.service_state != 'active'
+
+
+# =========================================================
+# SYSTEM CLOCK SYNCHRONIZATION
+# =========================================================
+
+- name: Assess system clock synchronization
+  ansible.builtin.set_fact:
+    hc_ntp_findings: >-
+      {{
+        hc_ntp_findings +
+        [
+          {
+            'id': 'system_clock_synchronized',
+            'category': 'NTP',
+            'severity': 'OK',
+            'message': 'The system clock is synchronized.',
+            'evidence': hc_ntp_data.timedatectl.raw,
+            'impact': 'The operating system reports that its system clock is synchronized with a time source.',
+            'diagnostic_commands': [],
+            'root_cause_checks': [],
+            'remediation': [],
+            'recommendation': 'No immediate action required. Continue routine monitoring.'
+          }
+        ]
+      }}
+  when:
+    - hc_ntp_data.timedatectl.raw is search('NTPSynchronized=yes')
+
+
+- name: Assess unsynchronized system clock
+  ansible.builtin.set_fact:
+    hc_ntp_findings: >-
+      {{
+        hc_ntp_findings +
+        [
+          {
+            'id': 'system_clock_not_synchronized',
+            'category': 'NTP',
+            'severity': 'CRITICAL',
+            'message': 'The system clock is not synchronized with an NTP source.',
+            'evidence': hc_ntp_data.timedatectl.raw,
+            'impact': 'Incorrect system time can affect authentication, Kerberos, TLS certificates, logging, scheduled jobs, databases, distributed applications, and cluster operations.',
+            'diagnostic_commands': [
+              'timedatectl',
+              'chronyc tracking',
+              'chronyc sources -n',
+              'chronyc sourcestats -n',
+              'systemctl status chronyd'
+            ],
+            'root_cause_checks': [
+              'Verify that chronyd is running.',
+              'Check whether a usable NTP source is selected.',
+              'Check the reported system time offset.',
+              'Verify DNS resolution for configured NTP servers.',
+              'Verify network connectivity and UDP/123 access to approved NTP sources.',
+              'Review recent Chrony journal messages.'
+            ],
+            'remediation': [
+              'Restore the Chrony service if required.',
+              'Correct invalid or unreachable NTP source configuration.',
+              'Resolve network, DNS, or firewall issues preventing NTP communication.',
+              'Validate synchronization after remediation.'
+            ],
+            'recommendation': 'Investigate the synchronization failure immediately and restore synchronization with an approved NTP source.'
+          }
+        ]
+      }}
+  when:
+    - hc_ntp_data.timedatectl.raw is not search('NTPSynchronized=yes')
+
+
+# =========================================================
+# CHRONY TRACKING VALUES
+# =========================================================
+
+- name: Extract Chrony stratum
+  ansible.builtin.set_fact:
+    hc_ntp_stratum: >-
+      {{
+        (
+          hc_ntp_data.chrony.tracking
+          | regex_findall('(?m)^Stratum\s*:\s*([0-9]+)')
+          | first
+          | default('0')
+        ) | int
+      }}
+
+
+- name: Extract Chrony system offset
+  ansible.builtin.set_fact:
+    hc_ntp_offset: >-
+      {{
+        (
+          hc_ntp_data.chrony.tracking
+          | regex_findall(
+              '(?m)^System time\s*:\s*([0-9.]+)\s+seconds'
+            )
+          | first
+          | default('0')
+        ) | float
+      }}
+
+
+# =========================================================
+# CHRONY STRATUM
+# =========================================================
+
+- name: Assess Chrony stratum
+  ansible.builtin.set_fact:
+    hc_ntp_findings: >-
+      {{
+        hc_ntp_findings +
+        [
+          {
+            'id': 'chrony_stratum',
+            'category': 'NTP',
+            'severity':
+              'CRITICAL'
+              if (hc_ntp_stratum | int) >= (health_check.ntp.stratum.critical | int)
+              else
+              'WARNING'
+              if (hc_ntp_stratum | int) >= (health_check.ntp.stratum.warning | int)
+              else
+              'OK',
+
+            'message':
+              'Chrony is operating at stratum ' ~
+              (hc_ntp_stratum | int | string) ~ '.',
+
+            'evidence':
+              'Stratum: ' ~
+              (hc_ntp_stratum | int | string),
+
+            'impact':
+              'A high NTP stratum may indicate that the server is synchronized through a less-preferred or distant time source. At very high stratum levels, reliable time synchronization may be at risk.'
+              if (hc_ntp_stratum | int) >= (health_check.ntp.stratum.warning | int)
+              else
+              'The reported NTP stratum is within the configured acceptable range.',
+
+            'diagnostic_commands':
+              [
+                'chronyc tracking',
+                'chronyc sources -n',
+                'chronyc sourcestats -n'
+              ]
+              if (hc_ntp_stratum | int) >= (health_check.ntp.stratum.warning | int)
+              else [],
+
+            'root_cause_checks':
+              [
+                'Check the currently selected NTP source.',
+                'Review the NTP source hierarchy.',
+                'Verify that the preferred upstream time source is reachable.',
+                'Check whether configured NTP sources are themselves synchronized correctly.'
+              ]
+              if (hc_ntp_stratum | int) >= (health_check.ntp.stratum.warning | int)
+              else [],
+
+            'remediation':
+              [
+                'Investigate the selected NTP source and source hierarchy.',
+                'Correct unavailable or incorrectly configured upstream time sources.',
+                'Ensure the server can reach the approved low-stratum NTP source.'
+              ]
+              if (hc_ntp_stratum | int) >= (health_check.ntp.stratum.warning | int)
+              else [],
+
+            'recommendation':
+              'Investigate the NTP source hierarchy and validate the configured upstream sources.'
+              if (hc_ntp_stratum | int) >= (health_check.ntp.stratum.warning | int)
+              else
+              'No immediate action required. Continue routine monitoring.'
+          }
+        ]
+      }}
+
+
+# =========================================================
+# SYSTEM TIME OFFSET
+# =========================================================
+
+- name: Assess Chrony system offset
+  ansible.builtin.set_fact:
+    hc_ntp_findings: >-
+      {{
+        hc_ntp_findings +
+        [
+          {
+            'id': 'chrony_system_offset',
+            'category': 'NTP',
+            'severity':
+              'CRITICAL'
+              if (hc_ntp_offset | float) >= (health_check.ntp.offset.critical_seconds | float)
+              else
+              'WARNING'
+              if (hc_ntp_offset | float) >= (health_check.ntp.offset.warning_seconds | float)
+              else
+              'OK',
+
+            'message':
+              'Chrony reports a system time offset of ' ~
+              (hc_ntp_offset | float | string) ~ ' seconds.',
+
+            'evidence':
+              'System offset: ' ~
+              (hc_ntp_offset | float | string) ~ ' seconds',
+
+            'impact':
+              'A significant system time offset can affect authentication, scheduled tasks, logging, certificates, databases, and distributed application behavior.'
+              if (hc_ntp_offset | float) >= (health_check.ntp.offset.warning_seconds | float)
+              else
+              'The reported system time offset is within the configured acceptable range.',
+
+            'diagnostic_commands':
+              [
+                'chronyc tracking',
+                'chronyc sources -n',
+                'chronyc sourcestats -n',
+                'timedatectl'
+              ]
+              if (hc_ntp_offset | float) >= (health_check.ntp.offset.warning_seconds | float)
+              else [],
+
+            'root_cause_checks':
+              [
+                'Check the currently selected NTP source.',
+                'Review Chrony tracking information.',
+                'Check NTP source reachability and stability.',
+                'Review source statistics for excessive delay or instability.',
+                'Check whether the system clock was recently adjusted or restored from an incorrect time source.'
+              ]
+              if (hc_ntp_offset | float) >= (health_check.ntp.offset.warning_seconds | float)
+              else [],
+
+            'remediation':
+              [
+                'Restore connectivity to the approved NTP source.',
+                'Correct invalid Chrony source configuration.',
+                'Resolve network, DNS, or firewall issues affecting NTP.',
+                'Allow Chrony to stabilize the system clock after correcting the underlying issue.'
+              ]
+              if (hc_ntp_offset | float) >= (health_check.ntp.offset.warning_seconds | float)
+              else [],
+
+            'recommendation':
+              'Investigate the time offset and validate Chrony sources, connectivity, and source stability.'
+              if (hc_ntp_offset | float) >= (health_check.ntp.offset.warning_seconds | float)
+              else
+              'No immediate action required. Continue routine monitoring.'
+          }
+        ]
+      }}
+
+
+# =========================================================
+# NTP SOURCE
+# =========================================================
+
+- name: Assess available NTP source
+  ansible.builtin.set_fact:
+    hc_ntp_findings: >-
+      {{
+        hc_ntp_findings +
+        [
+          {
+            'id': 'chrony_source_available',
+            'category': 'NTP',
+            'severity': 'OK',
+            'message': 'Chrony has a usable NTP synchronization source.',
+            'evidence': hc_ntp_data.chrony.sources,
+            'impact': 'Chrony has a currently selected synchronization source available.',
+            'diagnostic_commands': [],
+            'root_cause_checks': [],
+            'remediation': [],
+            'recommendation': 'No immediate action required. Continue routine monitoring.'
+          }
+        ]
+      }}
+  when:
+    - hc_ntp_data.chrony.sources is search('\\^\\*')
+
+
+- name: Assess missing selected NTP source
+  ansible.builtin.set_fact:
+    hc_ntp_findings: >-
+      {{
+        hc_ntp_findings +
+        [
+          {
+            'id': 'chrony_source_unavailable',
+            'category': 'NTP',
+            'severity': 'CRITICAL',
+            'message': 'Chrony does not have a currently selected NTP synchronization source.',
+            'evidence': hc_ntp_data.chrony.sources,
+            'impact': 'The server may be unable to synchronize its system clock with an approved time source.',
+            'diagnostic_commands': [
+              'chronyc sources -n',
+              'chronyc tracking',
+              'chronyc sourcestats -n',
+              'systemctl status chronyd',
+              'timedatectl'
+            ],
+            'root_cause_checks': [
+              'Check whether configured NTP sources are reachable.',
+              'Verify DNS resolution of configured NTP servers.',
+              'Verify network connectivity to the NTP servers.',
+              'Verify that UDP/123 is permitted by network or firewall controls.',
+              'Check whether the configured NTP sources are responding and synchronized.',
+              'Review recent Chrony journal messages.'
+            ],
+            'remediation': [
+              'Restore connectivity to an approved NTP source.',
+              'Correct invalid NTP source configuration.',
+              'Resolve DNS, routing, or firewall issues affecting NTP communication.',
+              'Validate that Chrony selects a healthy synchronization source.'
+            ],
+            'recommendation': 'Investigate the unavailable NTP source immediately and restore synchronization with an approved and reachable time source.'
+          }
+        ]
+      }}
+  when:
+    - hc_ntp_data.chrony.sources is not search('\\^\\*')
+
+
+# =========================================================
+# NTP HEALTH SUMMARY
+# =========================================================
+
+- name: Calculate NTP health summary
+  ansible.builtin.set_fact:
+    hc_ntp_critical_count: >-
+      {{
+        (
+          hc_ntp_findings
+          | selectattr('severity', 'equalto', 'CRITICAL')
+          | list
+          | length
+        ) | int
+      }}
+
+    hc_ntp_warning_count: >-
+      {{
+        (
+          hc_ntp_findings
+          | selectattr('severity', 'equalto', 'WARNING')
+          | list
+          | length
+        ) | int
+      }}
+
+    hc_ntp_info_count: >-
+      {{
+        (
+          hc_ntp_findings
+          | selectattr('severity', 'equalto', 'INFO')
+          | list
+          | length
+        ) | int
+      }}
+
+    hc_ntp_ok_count: >-
+      {{
+        (
+          hc_ntp_findings
+          | selectattr('severity', 'equalto', 'OK')
+          | list
+          | length
+        ) | int
+      }}
+
+
+- name: Determine NTP health status
+  ansible.builtin.set_fact:
+    hc_ntp_status: >-
+      {{
+        'CRITICAL'
+        if (hc_ntp_critical_count | int) > 0
+        else
+        'WARNING'
+        if (hc_ntp_warning_count | int) > 0
+        else
+        'OK'
+      }}
+
+
+# =========================================================
+# DISPLAY NTP ASSESSMENT
+# =========================================================
+
+- name: Display NTP health findings
+  ansible.builtin.debug:
+    var: hc_ntp_findings
+
+
+- name: Display NTP health summary
+  ansible.builtin.debug:
+    msg:
+      - "=================================================="
+      - "NTP / CHRONY HEALTH ASSESSMENT"
+      - "=================================================="
+      - "NTP Health: {{ hc_ntp_status }}"
+      - "Chrony Stratum: {{ hc_ntp_stratum }}"
+      - "System Offset: {{ hc_ntp_offset }} seconds"
+      - "CRITICAL Findings: {{ hc_ntp_critical_count }}"
+      - "WARNING Findings: {{ hc_ntp_warning_count }}"
+      - "INFO Findings: {{ hc_ntp_info_count }}"
+      - "OK Findings: {{ hc_ntp_ok_count }}"
+      - "=================================================="

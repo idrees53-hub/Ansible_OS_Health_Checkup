@@ -1,0 +1,251 @@
+---
+# =========================================================
+# STC RHEL OS HEALTH CHECK
+# GENERAL HEALTH ASSESSMENT
+#
+# Purpose:
+#   Assess filesystem health.
+#
+# Service assessment is handled separately by:
+#
+#   service_assessment.yml
+#
+# CPU assessment:
+#
+#   cpu_assessment.yml
+#
+# Memory assessment:
+#
+#   memory_assessment.yml
+#
+# Kernel assessment:
+#
+#   kernel_assessment.yml
+#
+# Final overall health is calculated by:
+#
+#   overall_assessment.yml
+# =========================================================
+
+- name: Initialize general health findings
+  ansible.builtin.set_fact:
+    hc_findings: []
+
+- name: Initialize filesystem findings
+  ansible.builtin.set_fact:
+    hc_filesystem_findings: []
+
+
+# =========================================================
+# ASSESS FILESYSTEM USAGE
+# =========================================================
+
+- name: Assess filesystem usage
+  ansible.builtin.set_fact:
+    hc_filesystem_findings: >-
+      {{
+        hc_filesystem_findings +
+        [
+          {
+            'category': 'filesystem',
+
+            'id':
+              (
+                'filesystem_'
+                ~ (
+                  item.split()[6]
+                  | regex_replace('^/$', 'root')
+                  | regex_replace('^/', '')
+                  | regex_replace('[^A-Za-z0-9_-]', '_')
+                )
+              ),
+
+            'severity': (
+              'CRITICAL'
+              if (item.split()[5] | regex_replace('%', '') | int)
+                 >= (health_check.filesystem.critical_percent | int)
+              else
+              'WARNING'
+              if (item.split()[5] | regex_replace('%', '') | int)
+                 >= (health_check.filesystem.warning_percent | int)
+              else
+              'OK'
+            ),
+
+            'filesystem': item.split()[0],
+
+            'fstype': item.split()[1],
+
+            'usage_percent':
+              (item.split()[5] | regex_replace('%', '') | int),
+
+            'mountpoint': item.split()[6],
+
+            'message': (
+              'Filesystem '
+              ~ item.split()[6]
+              ~ ' usage is '
+              ~ (
+                item.split()[5]
+                | regex_replace('%', '')
+                | int
+                | string
+              )
+              ~ '%.'
+            ),
+
+            'evidence': (
+              'Filesystem: '
+              ~ item.split()[0]
+              ~ '; mountpoint: '
+              ~ item.split()[6]
+              ~ '; filesystem type: '
+              ~ item.split()[1]
+              ~ '; usage: '
+              ~ (
+                item.split()[5]
+                | regex_replace('%', '')
+                | int
+                | string
+              )
+              ~ '%.'
+            ),
+
+            'impact': (
+              'High filesystem utilization can reduce available disk space '
+              'for applications, logs, temporary files, package operations, '
+              'and system services. If the filesystem reaches 100%, '
+              'applications and operating system functions may fail.'
+            ),
+
+            'diagnostic_commands': (
+              [
+                'df -hT ' ~ item.split()[6],
+                'du -xhd1 ' ~ item.split()[6] ~ ' | sort -h',
+                'find ' ~ item.split()[6] ~ ' -xdev -type f -size +500M -ls',
+                'journalctl --disk-usage'
+              ]
+              if
+              (
+                (item.split()[5] | regex_replace('%', '') | int)
+                >= (health_check.filesystem.warning_percent | int)
+              )
+              else
+              []
+            ),
+
+            'root_cause_checks': (
+              [
+                'Identify directories consuming the most filesystem space.',
+                'Check for large or rapidly growing application and system logs.',
+                'Check for old temporary files, cached data, backups, or application-generated files.',
+                'Check whether deleted files are still held open by running processes using lsof.',
+                'Verify whether log rotation and retention policies are functioning correctly.',
+                'Check whether the filesystem growth is expected for the application workload.'
+              ]
+              if
+              (
+                (item.split()[5] | regex_replace('%', '') | int)
+                >= (health_check.filesystem.warning_percent | int)
+              )
+              else
+              []
+            ),
+
+            'remediation': (
+              [
+                'Remove or archive unnecessary files according to the approved retention policy.',
+                'Clean up old temporary files, caches, or obsolete application data where appropriate.',
+                'Correct log rotation or retention issues if excessive log growth is identified.',
+                'Move appropriate data to additional storage when capacity expansion is required.',
+                'Extend the filesystem or underlying storage when continued growth is expected.',
+                'Validate application functionality after disk-space remediation.'
+              ]
+              if
+              (
+                (item.split()[5] | regex_replace('%', '') | int)
+                >= (health_check.filesystem.warning_percent | int)
+              )
+              else
+              []
+            ),
+
+            'recommendation': (
+              'Filesystem usage has reached the configured critical threshold. '
+              'Investigate disk consumption immediately, identify the source of '
+              'growth, free or expand capacity, and verify application and system '
+              'functionality.'
+              if
+              (
+                (item.split()[5] | regex_replace('%', '') | int)
+                >= (health_check.filesystem.critical_percent | int)
+              )
+              else
+              'Filesystem usage has reached the configured warning threshold. '
+              'Investigate disk consumption, review logs and application data, '
+              'and plan cleanup or capacity expansion before the filesystem '
+              'reaches a critical level.'
+              if
+              (
+                (item.split()[5] | regex_replace('%', '') | int)
+                >= (health_check.filesystem.warning_percent | int)
+              )
+              else
+              'No immediate action required. Continue routine filesystem '
+              'capacity monitoring and investigate abnormal growth during '
+              'future health checks.'
+            )
+          }
+        ]
+      }}
+  loop: "{{ hc_filesystems.stdout_lines[1:] }}"
+  when:
+    - item.split() | length >= 7
+    - item.split()[1] not in health_check.filesystem.excluded_filesystems
+    - item.split()[6] not in health_check.filesystem.excluded_mountpoints
+
+
+# =========================================================
+# DISPLAY FILESYSTEM FINDINGS
+# =========================================================
+
+- name: Display filesystem assessment
+  ansible.builtin.debug:
+    var: hc_filesystem_findings
+
+
+# =========================================================
+# DETERMINE FILESYSTEM HEALTH
+# =========================================================
+
+- name: Determine filesystem health status
+  ansible.builtin.set_fact:
+    hc_filesystem_status: >-
+      {{
+        'CRITICAL'
+        if (
+          hc_filesystem_findings
+          | selectattr('severity', 'equalto', 'CRITICAL')
+          | list
+          | length
+        ) > 0
+        else
+        'WARNING'
+        if (
+          hc_filesystem_findings
+          | selectattr('severity', 'equalto', 'WARNING')
+          | list
+          | length
+        ) > 0
+        else
+        'OK'
+      }}
+
+
+# =========================================================
+# DISPLAY FILESYSTEM HEALTH STATUS
+# =========================================================
+
+- name: Display filesystem health status
+  ansible.builtin.debug:
+    msg: "Filesystem Health: {{ hc_filesystem_status }}"

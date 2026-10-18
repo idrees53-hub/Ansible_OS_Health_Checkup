@@ -1,0 +1,245 @@
+---
+# ============================================================
+# STC RHEL OS HEALTH CHECK
+# SERVICE HEALTH ASSESSMENT
+#
+# Purpose:
+#   Assess dynamically discovered systemd services.
+#
+# Design principle:
+#
+#   services.yml
+#       ↓
+#   Collect service data
+#       ↓
+#   service_assessment.yml
+#       ↓
+#   Determine service health
+#
+# No hard-coded critical-service list is used.
+#
+# Current assessment policy:
+#
+#   FAILED service  → WARNING
+#   No failed       → OK
+#
+# Important:
+#   inactive/dead services are NOT automatically unhealthy.
+#   static/disabled services are NOT automatically unhealthy.
+#
+# Diagnostic commands are recommendations only.
+# They are NOT executed during the health assessment.
+# ============================================================
+
+
+# ============================================================
+# 1. INITIALIZE SERVICE FINDINGS
+# ============================================================
+
+- name: Initialize service health findings
+  ansible.builtin.set_fact:
+    hc_service_findings: []
+
+
+# ============================================================
+# 2. ASSESS FAILED SERVICES
+# ============================================================
+
+- name: Assess failed systemd services
+  ansible.builtin.set_fact:
+    hc_service_findings: >-
+      {{
+        hc_service_findings +
+        [
+          {
+            'category': 'services',
+            'id': 'failed_service_' ~ (item | regex_replace('\.service$', '')),
+            'severity': 'WARNING',
+            'service': item,
+
+            'message':
+              'Systemd service ' ~ item ~ ' is in a failed state.',
+
+            'evidence':
+              'systemctl --failed reported ' ~ item ~ ' as failed.',
+
+            'impact':
+              'A failed systemd service may cause loss of an application, '
+              'system function, scheduled task, monitoring capability, '
+              'network function, or other dependent workload.',
+
+            'diagnostic_commands':
+              [
+                'systemctl status ' ~ item ~ ' --no-pager',
+                'systemctl show ' ~ item ~ ' -p ActiveState -p SubState -p Result -p ExecMainStatus',
+                'journalctl -u ' ~ item ~ ' --since "24 hours ago" --no-pager',
+                'systemctl cat ' ~ item,
+                'systemctl list-dependencies ' ~ item
+              ],
+
+            'root_cause_checks':
+              [
+                'Review the service journal for startup or runtime errors.',
+                'Check the service exit status and recent failure reason.',
+                'Verify that required configuration files exist and are valid.',
+                'Check whether required ports, filesystems, users, permissions, or network dependencies are available.',
+                'Check whether the failure started after a recent package, configuration, kernel, or application change.',
+                'Determine whether dependent services or resources are unavailable.'
+              ],
+
+            'remediation':
+              [
+                'Correct the identified configuration, dependency, permission, or resource issue.',
+                'Restart the service after the underlying problem has been resolved.',
+                'If the service is required at boot, verify that it is enabled.',
+                'If the service is intentionally no longer required, validate the application dependency and document the expected state before disabling or removing it.',
+                'Escalate to the application, storage, network, or virtualization team when the root cause is outside the operating system.'
+              ],
+
+            'recommendation':
+              'Investigate the failed service using the diagnostic commands, '
+              'identify the underlying cause, remediate the issue, and verify '
+              'that the service returns to the expected state.'
+          }
+        ]
+      }}
+  loop: "{{ hc_service_data.failed_services | default([]) }}"
+  when:
+    - health_check.services.check_failed_services | bool
+
+
+# ============================================================
+# 3. ADD SERVICE OK FINDING
+# ============================================================
+
+- name: Add service OK finding
+  ansible.builtin.set_fact:
+    hc_service_findings: >-
+      {{
+        hc_service_findings +
+        [
+          {
+            'category': 'services',
+            'id': 'systemd_services_healthy',
+            'severity': 'OK',
+            'service': 'systemd',
+
+            'message':
+              'No failed systemd services were detected.',
+
+            'evidence':
+              'systemctl --failed --type=service returned no failed services.',
+
+            'impact':
+              'No failed systemd services were identified during the health check.',
+
+            'diagnostic_commands': [],
+
+            'root_cause_checks': [],
+
+            'remediation': [],
+
+            'recommendation':
+              'No action required. Continue routine service monitoring '
+              'and investigate any service failures detected during future health checks.'
+          }
+        ]
+      }}
+  when:
+    - health_check.services.check_failed_services | bool
+    - (hc_service_data.failed_services | default([]) | length) == 0
+
+
+# ============================================================
+# 4. CALCULATE SERVICE HEALTH SUMMARY
+# ============================================================
+
+- name: Calculate service health summary
+  ansible.builtin.set_fact:
+    hc_service_critical_count: >-
+      {{
+        (
+          hc_service_findings
+          | selectattr('severity', 'equalto', 'CRITICAL')
+          | list
+          | length
+        ) | int
+      }}
+
+    hc_service_warning_count: >-
+      {{
+        (
+          hc_service_findings
+          | selectattr('severity', 'equalto', 'WARNING')
+          | list
+          | length
+        ) | int
+      }}
+
+    hc_service_info_count: >-
+      {{
+        (
+          hc_service_findings
+          | selectattr('severity', 'equalto', 'INFO')
+          | list
+          | length
+        ) | int
+      }}
+
+    hc_service_ok_count: >-
+      {{
+        (
+          hc_service_findings
+          | selectattr('severity', 'equalto', 'OK')
+          | list
+          | length
+        ) | int
+      }}
+
+
+# ============================================================
+# 5. DETERMINE SERVICE HEALTH
+# ============================================================
+
+- name: Determine service health status
+  ansible.builtin.set_fact:
+    hc_service_status: >-
+      {{
+        'CRITICAL'
+        if (hc_service_critical_count | int) > 0
+        else
+        'WARNING'
+        if (hc_service_warning_count | int) > 0
+        else
+        'OK'
+      }}
+
+
+# ============================================================
+# 6. DISPLAY SERVICE HEALTH SUMMARY
+# ============================================================
+
+- name: Display service health summary
+  ansible.builtin.debug:
+    msg:
+      - "=================================================="
+      - "SERVICE HEALTH ASSESSMENT"
+      - "=================================================="
+      - "Service Inventory: {{ hc_service_inventory_count }}"
+      - "Runtime Services: {{ hc_service_runtime_count }}"
+      - "Failed Services: {{ hc_failed_service_count }}"
+      - "Service Health: {{ hc_service_status }}"
+      - "CRITICAL Findings: {{ hc_service_critical_count }}"
+      - "WARNING Findings: {{ hc_service_warning_count }}"
+      - "INFO Findings: {{ hc_service_info_count }}"
+      - "OK Findings: {{ hc_service_ok_count }}"
+      - "=================================================="
+
+
+# ============================================================
+# 7. DISPLAY SERVICE FINDINGS
+# ============================================================
+
+- name: Display service health findings
+  ansible.builtin.debug:
+    var: hc_service_findings

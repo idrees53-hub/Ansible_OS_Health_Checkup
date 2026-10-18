@@ -1,0 +1,12 @@
+---
+- name: Collect RHEL OS version
+  ansible.builtin.command:
+    cmd: cat /etc/redhat-release
+  register: os_version_result
+  changed_when: false
+
+- name: Collect RHEL major version
+  ansible.builtin.command:
+    cmd: rpm -E %{rhel}
+  register: rhel_major_version
+  changed_when: false

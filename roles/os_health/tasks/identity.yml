@@ -30,3 +30,17 @@
       os_release: "{{ hc_os_release.stdout }}"
       kernel: "{{ hc_kernel.stdout }}"
       uptime: "{{ hc_uptime.stdout }}"
+
+ - name: Collect system UUID (SMBIOS/DMI)
+   ansible.builtin.command:
+    cmd: dmidecode -s system-uuid
+   register: hc_system_uuid
+   changed_when: false
+   failed_when: false
+
+ - name: Collect latest DNF package transaction details
+   ansible.builtin.command:
+    cmd: dnf history info last
+   register: hc_last_package_transaction
+   changed_when: false
+   failed_when: false

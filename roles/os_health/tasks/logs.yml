@@ -1,58 +1,177 @@
 ---
- - name: Collect journal disk usage 
-   ansible.builtin.command: 
+- name: Collect journal disk usage 
+  ansible.builtin.command: 
     cmd: journalctl --disk-usage 
-   register: hc_jorunal_disk 
-   changed_when: false 
-   failed_when: false 
+  register: hc_jorunal_disk 
+  changed_when: false 
+  failed_when: false 
 
- - name: Collect current boot errors 
-   ansible.builtin.command: 
+- name: Collect current boot errors 
+  ansible.builtin.command: 
     cmd: journalctl -p err..alert  -b --no-pager 
-   register: hc_journal_errors
-   changed_when: false 
-   failed_when: false 
+  register: hc_journal_errors
+  changed_when: false 
+  failed_when: false 
 
- - name: Collect current boot warnings an errors
-   ansible.builtin.command: 
+- name: Collect current boot warnings an errors
+  ansible.builtin.command: 
     cmd: journalctl -p warning..alert -b --no-pager
-   register: hc_journal_warnings
-   changed_when: false
-   failed_when: false
+  register: hc_journal_warnings
+  changed_when: false
+  failed_when: false
 
- - name: Collect current boot warnings an errors
-   ansible.builtin.command:
+- name: Collect current boot warnings an errors
+  ansible.builtin.command:
     cmd: journalctl -k -b --no-pager
-   register: hc_kernel_journal
-   changed_when: false
-   failed_when: false
+  register: hc_kernel_journal
+  changed_when: false
+  failed_when: false
 
- - name: Collect current boot warnings an errors
-   ansible.builtin.command:
+- name: Collect current boot warnings an errors
+  ansible.builtin.command:
     cmd: journalctl -k -b -p warning..alert --no-pager
-   register: hc_kernel_warnings
-   changed_when: false
-   failed_when: false
+  register: hc_kernel_warnings
+  changed_when: false
+  failed_when: false
 
- - name: Collect recent messages logs 
-   ansible.builtin.command: 
+- name: Collect recent messages logs 
+  ansible.builtin.command: 
     cmd: tail -100 /var/log/messages
-   register: hc_messages
-   changed_when: false 
-   failed_when: false 
+  register: hc_messages
+  changed_when: false 
+  failed_when: false 
 
- - name: Collect recent secure log 
-   ansible.builtin.command: 
+- name: Collect recent secure log 
+  ansible.builtin.command: 
     cmd: tail -100 /var/log/secure
-   register: hc_secure 
-   changed_when: false
-   failed_when: false 
+  register: hc_secure 
+  changed_when: false
+  failed_when: false 
 
- - name: Collect recent audit log 
-   ansible.builtin.command: 
+- name: Collect recent audit log 
+  ansible.builtin.command: 
     cmd: tail -100 /var/log/audit/audit.log
-   changed_when: false 
-   failed_when: false 
+  changed_when: false 
+  failed_when: false 
 
+# =========================================================
+# RECENT JOURNAL INTELLIGENCE
+# =========================================================
 
+- name: Collect recent journal errors
+  ansible.builtin.command:
+    cmd: >-
+      journalctl
+      --since "{{ health_check.log_lookback_days }} days ago"
+      -p err..alert
+      --no-pager
+  register: hc_recent_journal_errors
+  changed_when: false
+  failed_when: false
+
+- name: Collect recent journal warnings
+  ansible.builtin.command:
+    cmd: >-
+      journalctl
+      --since "{{ health_check.log_lookback_days }} days ago"
+      -p warning..alert
+      --no-pager
+  register: hc_recent_journal_warnings
+  changed_when: false
+  failed_when: false
+
+- name: Collect recent kernel errors
+  ansible.builtin.command:
+    cmd: >-
+      journalctl
+      -k
+      --since "{{ health_check.log_lookback_days }} days ago"
+      -p err..alert
+      --no-pager
+  register: hc_recent_kernel_errors
+  changed_when: false
+  failed_when: false
+
+- name: Collect recent kernel warnings
+  ansible.builtin.command:
+    cmd: >-
+      journalctl
+      -k
+      --since "{{ health_check.log_lookback_days }} days ago"
+      -p warning..alert
+      --no-pager
+  register: hc_recent_kernel_warnings
+  changed_when: false
+  failed_when: false
+
+# =========================================================
+# LOG FILE AVAILABILITY
+# =========================================================
+
+- name: Check traditional RHEL log files
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - /var/log/messages
+    - /var/log/secure
+    - /var/log/cron
+    - /var/log/dnf.log
+    - /var/log/audit/audit.log
+  register: hc_log_file_status
+  changed_when: false
+
+# =========================================================
+# STRUCTURED LOG DATA
+# =========================================================
+
+- name: Build structured log data
+  ansible.builtin.set_fact:
+    hc_log_data:
+
+      journal:
+        disk_usage: "{{ hc_jorunal_disk.stdout | default('') }}"
+        current_boot_errors: "{{ hc_journal_errors.stdout | default('') }}"
+        current_boot_warnings: "{{ hc_journal_warnings.stdout | default('') }}"
+        recent_errors: "{{ hc_recent_journal_errors.stdout | default('') }}"
+        recent_warnings: "{{ hc_recent_journal_warnings.stdout | default('') }}"
+
+      kernel:
+        current_boot: "{{ hc_kernel_journal.stdout | default('') }}"
+        current_boot_warnings: "{{ hc_kernel_warnings.stdout | default('') }}"
+        recent_errors: "{{ hc_recent_kernel_errors.stdout | default('') }}"
+        recent_warnings: "{{ hc_recent_kernel_warnings.stdout | default('') }}"
+
+      traditional_logs:
+        messages: "{{ hc_messages.stdout | default('') }}"
+        secure: "{{ hc_secure.stdout | default('') }}"
+
+      audit:
+        log_available: >-
+          {{
+            (
+              hc_log_file_status.results
+              | selectattr('item', 'equalto', '/var/log/audit/audit.log')
+              | map(attribute='stat.exists')
+              | first
+              | default(false)
+            )
+          }}
+
+# =========================================================
+# COLLECTION SUMMARY
+# =========================================================
+
+- name: Display log collection summary
+  ansible.builtin.debug:
+    msg:
+      - "=================================================="
+      - "LOG DATA COLLECTION"
+      - "=================================================="
+      - "Journal lookback: {{ health_check.log_lookback_days }} days"
+      - "Recent journal errors collected: {{ 'Yes' if hc_log_data.journal.recent_errors | length > 0 else 'No' }}"
+      - "Recent journal warnings collected: {{ 'Yes' if hc_log_data.journal.recent_warnings | length > 0 else 'No' }}"
+      - "Recent kernel errors collected: {{ 'Yes' if hc_log_data.kernel.recent_errors | length > 0 else 'No' }}"
+      - "Recent kernel warnings collected: {{ 'Yes' if hc_log_data.kernel.recent_warnings | length > 0 else 'No' }}"
+      - "Audit log available: {{ hc_log_data.audit.log_available }}"
+      - "=================================================="
 

@@ -1,0 +1,35 @@
+---
+- name: Check if sysstat package is installed
+  ansible.builtin.command:
+    cmd: rpm -q sysstat
+  register: sysstat_package
+  changed_when: false
+  failed_when: false
+
+- name: Set SAR availability
+  ansible.builtin.set_fact:
+    sar_available: "{{ sysstat_package.rc == 0 }}"
+
+- name: Collect SAR CPU statistics
+  ansible.builtin.command:
+    cmd: sar -u
+  register: sar_cpu
+  changed_when: false
+  failed_when: false
+  when: sar_available | bool
+
+- name: Collect SAR memory statistics
+  ansible.builtin.command:
+    cmd: sar -r
+  register: sar_memory
+  changed_when: false
+  failed_when: false
+  when: sar_available | bool
+
+- name: Collect SAR load statistics
+  ansible.builtin.command:
+    cmd: sar -q
+  register: sar_load
+  changed_when: false
+  failed_when: false
+  when: sar_available | bool

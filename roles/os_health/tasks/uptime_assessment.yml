@@ -1,0 +1,228 @@
+---
+# ============================================================
+# STC RHEL OS HEALTH CHECK
+# UPTIME HEALTH ASSESSMENT
+#
+# Purpose:
+#   Assess system uptime against configured thresholds and
+#   provide actionable recommendations.
+#
+# Current policy:
+#
+#   < warning threshold   → OK
+#   >= warning threshold  → WARNING
+#   >= critical threshold → CRITICAL
+#
+# Important:
+#   This assessment does NOT reboot the server.
+#   Diagnostic and remediation commands are recommendations
+#   only and are NOT executed during the health check.
+# ============================================================
+
+
+# ============================================================
+# 1. INITIALIZE UPTIME FINDINGS
+# ============================================================
+
+- name: Initialize uptime findings
+  ansible.builtin.set_fact:
+    uptime_findings: []
+
+
+# ============================================================
+# 2. CRITICAL UPTIME
+# ============================================================
+
+- name: Assess critical uptime
+  ansible.builtin.set_fact:
+    uptime_findings: >-
+      {{
+        uptime_findings +
+        [
+          {
+            'category': 'Uptime',
+
+            'id': 'long_uptime_critical',
+
+            'severity': 'CRITICAL',
+
+            'message':
+              'Server has been running continuously for an extended period without a reboot.',
+
+            'evidence':
+              uptime_result.stdout ~
+              ' (' ~
+              (uptime_days | string) ~
+              ' days)',
+
+            'impact':
+              'The server has exceeded the configured critical uptime threshold. '
+              'Kernel updates, security fixes, driver changes, and other system '
+              'updates may be pending a reboot. Long-running systems may also '
+              'accumulate stale resources or operational drift.',
+
+            'diagnostic_commands':
+              [
+                'uptime -p',
+                'cat /proc/uptime',
+                'last reboot | head -10',
+                'who -b',
+                'needs-restarting -r',
+                'dnf updateinfo list updates'
+              ],
+
+            'root_cause_checks':
+              [
+                'Confirm when the server was last rebooted.',
+                'Check whether a reboot is pending because of kernel or system updates.',
+                'Check whether the server has an approved maintenance or reboot schedule.',
+                'Identify application, database, or service dependencies that may prevent an immediate reboot.',
+                'Check whether recent security or kernel updates require a reboot.',
+                'Confirm that backup and rollback procedures are available before scheduling the reboot.'
+              ],
+
+            'remediation':
+              [
+                'Review pending system and security updates.',
+                'Confirm application and service dependencies before rebooting.',
+                'Coordinate an approved maintenance window with the application and operations teams.',
+                'Verify backups and rollback procedures.',
+                'Reboot the server during the approved maintenance window when operationally safe.',
+                'Validate system services, applications, networking, storage, and monitoring after the reboot.'
+              ],
+
+            'recommendation':
+              'Review pending updates and reboot requirements. '
+              'Plan a controlled reboot during an approved maintenance window '
+              'after validating application dependencies, backups, and rollback procedures.'
+          }
+        ]
+      }}
+  when:
+    - uptime_days | float >= health_check.uptime.critical_days | float
+
+
+# ============================================================
+# 3. WARNING UPTIME
+# ============================================================
+
+- name: Assess warning uptime
+  ansible.builtin.set_fact:
+    uptime_findings: >-
+      {{
+        uptime_findings +
+        [
+          {
+            'category': 'Uptime',
+
+            'id': 'long_uptime_warning',
+
+            'severity': 'WARNING',
+
+            'message':
+              'Server has been running for an extended period without a reboot.',
+
+            'evidence':
+              uptime_result.stdout ~
+              ' (' ~
+              (uptime_days | string) ~
+              ' days)',
+
+            'impact':
+              'The server has exceeded the configured warning uptime threshold. '
+              'Kernel or system updates may be pending a reboot, and prolonged '
+              'uptime can increase the risk of system drift or stale resources.',
+
+            'diagnostic_commands':
+              [
+                'uptime -p',
+                'cat /proc/uptime',
+                'last reboot | head -10',
+                'who -b',
+                'needs-restarting -r',
+                'dnf updateinfo list updates'
+              ],
+
+            'root_cause_checks':
+              [
+                'Confirm the last reboot date.',
+                'Check whether kernel or system updates are pending.',
+                'Check whether the server follows an approved reboot schedule.',
+                'Identify application or service dependencies that could delay a reboot.',
+                'Confirm whether a reboot is required for recently installed updates.'
+              ],
+
+            'remediation':
+              [
+                'Review pending updates and reboot requirements.',
+                'Coordinate with application owners before scheduling a reboot.',
+                'Verify backups and required maintenance procedures.',
+                'Schedule a controlled reboot during an approved maintenance window.',
+                'Validate system and application health after the reboot.'
+              ],
+
+            'recommendation':
+              'Review pending updates and reboot requirements. '
+              'Plan a controlled reboot during an approved maintenance window '
+              'if required by the system update and operational policy.'
+          }
+        ]
+      }}
+  when:
+    - uptime_days | float >= health_check.uptime.warning_days | float
+    - uptime_days | float < health_check.uptime.critical_days | float
+
+
+# ============================================================
+# 4. HEALTHY UPTIME
+# ============================================================
+
+- name: Report healthy uptime
+  ansible.builtin.set_fact:
+    uptime_findings: >-
+      {{
+        uptime_findings +
+        [
+          {
+            'category': 'Uptime',
+
+            'id': 'uptime_healthy',
+
+            'severity': 'OK',
+
+            'message':
+              'Server uptime is within the configured threshold.',
+
+            'evidence':
+              uptime_result.stdout ~
+              ' (' ~
+              (uptime_days | string) ~
+              ' days)',
+
+            'impact':
+              'No uptime-related concern was identified based on the '
+              'configured warning and critical thresholds.',
+
+            'diagnostic_commands': [],
+
+            'root_cause_checks': [],
+
+            'remediation': [],
+
+            'recommendation':
+              'No action required. Continue routine uptime, patching, '
+              'and reboot monitoring according to the approved operational schedule.'
+          }
+        ]
+      }}
+  when:
+    - uptime_days | float < health_check.uptime.warning_days | float
+
+
+# ============================================================
+# 5. DISPLAY UPTIME FINDINGS
+# ============================================================
+
+- name: Display uptime findings
+  ansible.builtin.debug:
+    var: uptime_findings

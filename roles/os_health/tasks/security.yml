@@ -1,0 +1,118 @@
+---
+# =========================================================
+# STC RHEL OS HEALTH CHECK
+# SECURITY DATA COLLECTION
+#
+# Collects:
+#   - SELinux status
+#   - Firewall state
+#   - Red Hat subscription status
+#
+# No health decisions are made here.
+# =========================================================
+
+- name: Collect SELinux status
+  ansible.builtin.command:
+    cmd: getenforce
+  register: hc_selinux_status
+  changed_when: false
+  failed_when: false
+
+- name: Collect SELinux configuration
+  ansible.builtin.command:
+    cmd: sestatus
+  register: hc_selinux_details
+  changed_when: false
+  failed_when: false
+
+- name: Check firewalld service state
+  ansible.builtin.command:
+    cmd: systemctl is-active firewalld
+  register: hc_firewalld_state
+  changed_when: false
+  failed_when: false
+
+- name: Collect firewalld active zones
+  ansible.builtin.command:
+    cmd: firewall-cmd --get-active-zones
+  register: hc_firewalld_zones
+  changed_when: false
+  failed_when: false
+
+- name: Collect nftables service state
+  ansible.builtin.command:
+    cmd: systemctl is-active nftables
+  register: hc_nftables_state
+  changed_when: false
+  failed_when: false
+
+#------------------------------------------
+#RED HAT SUBSCRIPTION
+#------------------------------------------
+
+- name: Collect Red Hat subscription status
+  ansible.builtin.command:
+    cmd: subscription-manager status
+  register: hc_subscription_status
+  changed_when: false
+  failed_when: false
+
+- name: Collect Red Hat subcription identity 
+  ansible.builtin.command:
+    cmd: subscription-manager identity
+  register: hc_subscription_identity
+  changed_when: false
+  failed_when: false
+
+
+- name: Collect consumed Red Hat subscriptions 
+  ansible.builtin.command:
+    cmd: subscription-manager list --consumed 
+  register: hc_subscription_consumed
+  changed_when: false
+  failed_when: false
+
+
+- name: Build structured security data
+  ansible.builtin.set_fact:
+    hc_security_data:
+      selinux:
+        status: "{{ hc_selinux_status.stdout | default('unknown') | trim }}"
+        details: "{{ hc_selinux_details.stdout | default('') }}"
+
+      firewall:
+        firewalld:
+          state: "{{ hc_firewalld_state.stdout | default('unknown') | trim }}"
+          active_zones: "{{ hc_firewalld_zones.stdout | default('') }}"
+        nftables:
+          state: "{{ hc_nftables_state.stdout | default('unknown') | trim }}"
+
+      subscription:
+        status:
+          rc: "{{ hc_subscription_status.rc | default(1) }}"
+          output: "{{ hc_subscription_status.stdout | default('') }}"
+          error: "{{ hc_subscription_status.stderr | default('') }}"
+
+        identity:
+          rc: "{{ hc_subscription_identity.rc | default(1) }}"
+          output: "{{ hc_subscription_identity.stdout | default('') }}"
+          error: "{{ hc_subscription_identity.stderr | default('') }}"
+
+        consumed:
+          rc: "{{ hc_subscription_consumed.rc | default(1) }}"
+          output: "{{ hc_subscription_consumed.stdout | default('') }}"
+          error: "{{ hc_subscription_consumed.stderr | default('') }}"
+
+- name: Display security collection summary
+  ansible.builtin.debug:
+    msg:
+      - "=================================================="
+      - "SECURITY DATA COLLECTION"
+      - "=================================================="
+      - "SELinux: {{ hc_security_data.selinux.status }}"
+      - "firewalld: {{ hc_security_data.firewall.firewalld.state }}"
+      - "nftables: {{ hc_security_data.firewall.nftables.state }}"
+      - "Subscription status RC: {{ hc_security_data.subscription.status.rc }}"
+      - "Subscription identity RC: {{ hc_security_data.subscription.identity.rc }}"
+      - "Subscription consumed RC: {{ hc_security_data.subscription.consumed.rc }}"
+      - "=================================================="

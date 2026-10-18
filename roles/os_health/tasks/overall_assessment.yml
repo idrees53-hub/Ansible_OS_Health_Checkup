@@ -52,6 +52,17 @@
         (hc_memory_findings | default([]))
       }}
 
+#-------------------------------------------------------------
+# ADD SERVICE FINDINGS
+#-------------------------------------------------------------
+
+- name: Add service findings
+  ansible.builtin.set_fact:
+    hc_all_findings: >-
+      {{
+        hc_all_findings + 
+        (hc_service_findings | default([]))
+      }} 
 
 # ------------------------------------------------------------
 # ADD KERNEL FINDINGS
@@ -65,12 +76,101 @@
         (hc_kernel_findings | default([]))
       }}
 
+# ------------------------------------------------------------
+# ADD SECURITY FINDINGS
+# ------------------------------------------------------------
+
+- name: Add security findings
+  ansible.builtin.set_fact:
+    hc_all_findings: >-
+      {{
+        hc_all_findings +
+        (hc_security_findings | default([]))
+      }}
+
+# ------------------------------------------------------------
+# ADD LOG FINDINGS
+# ------------------------------------------------------------
+
+- name: Add log findings
+  ansible.builtin.set_fact:
+    hc_all_findings: >-
+      {{
+        hc_all_findings +
+        (hc_log_findings | default([]))
+      }}
+
+# ------------------------------------------------------------
+# ADD NETWORK FINDINGS
+# ------------------------------------------------------------
+
+- name: Add network findings
+  ansible.builtin.set_fact:
+    hc_all_findings: >-
+      {{
+        hc_all_findings +
+        (hc_network_findings | default([]))
+      }}
+      
+
+
+# ------------------------------------------------------------
+# ADD NTP FINDINGS
+# ------------------------------------------------------------
+
+- name: Add NTP findings
+  ansible.builtin.set_fact:
+    hc_all_findings: >-
+      {{
+        hc_all_findings +
+        (hc_ntp_findings | default([]))
+      }}
+
+
+# ------------------------------------------------------------
+# ADD OS VERSION FINDINGS
+# ------------------------------------------------------------
+
+- name: Add OS version findings
+  ansible.builtin.set_fact:
+    hc_all_findings: >-
+      {{
+        hc_all_findings +
+        (os_version_findings | default([]))
+      }}
+
+
+# ------------------------------------------------------------
+# ADD UPTIME FINDINGS
+# ------------------------------------------------------------
+
+- name: Add uptime findings
+  ansible.builtin.set_fact:
+    hc_all_findings: >-
+      {{
+        hc_all_findings +
+        (uptime_findings | default([]))
+      }}
+
+
+# ------------------------------------------------------------
+# ADD SAR FINDINGS
+# ------------------------------------------------------------
+
+- name: Add SAR findings
+  ansible.builtin.set_fact:
+    hc_all_findings: >-
+      {{
+        hc_all_findings +
+        (sar_findings | default([]))
+      }}
+
 
 # ------------------------------------------------------------
 # ADD GENERAL FINDINGS
 #
 # Contains:
-#   - Systemd services
+#   - General health findings
 # ------------------------------------------------------------
 
 - name: Add general health findings

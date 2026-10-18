@@ -1,0 +1,536 @@
+---
+# =========================================================
+# STC RHEL OS HEALTH CHECK
+# NETWORK HEALTH ASSESSMENT
+#
+# Collection is performed in network.yml.
+# This file evaluates the collected network data.
+#
+# Assessment only.
+# No diagnostic commands are executed here.
+# =========================================================
+
+
+# =========================================================
+# INITIALIZATION
+# =========================================================
+
+- name: Initialize network health findings
+  ansible.builtin.set_fact:
+    hc_network_findings: []
+
+
+# =========================================================
+# NETWORKMANAGER
+# =========================================================
+
+- name: Assess NetworkManager state
+  ansible.builtin.set_fact:
+    hc_network_findings: >-
+      {{
+        hc_network_findings +
+        [
+          {
+            'id': 'networkmanager_active',
+            'category': 'Network',
+            'severity': 'OK',
+            'message': 'NetworkManager service is active.',
+            'evidence': hc_network_data.networkmanager.state,
+            'impact': 'No immediate network management issue was detected.',
+            'diagnostic_commands': [],
+            'root_cause_checks': [],
+            'remediation': [],
+            'recommendation': 'No immediate action required. Continue routine monitoring.'
+          }
+        ]
+      }}
+  when:
+    - hc_network_data.networkmanager.state == 'active'
+
+
+- name: Assess NetworkManager inactive state
+  ansible.builtin.set_fact:
+    hc_network_findings: >-
+      {{
+        hc_network_findings +
+        [
+          {
+            'id': 'networkmanager_inactive',
+            'category': 'Network',
+            'severity': 'WARNING',
+            'message': 'NetworkManager service is not active.',
+            'evidence': hc_network_data.networkmanager.state,
+            'impact': 'Network connections may not be managed correctly, which can affect server connectivity and network configuration persistence.',
+            'diagnostic_commands': [
+              'systemctl status NetworkManager',
+              'systemctl is-enabled NetworkManager',
+              'journalctl -u NetworkManager --since "24 hours ago"'
+            ],
+            'root_cause_checks': [
+              'Check whether NetworkManager is intentionally disabled.',
+              'Check NetworkManager service failures or recent restart attempts.',
+              'Review NetworkManager journal messages.',
+              'Verify the configured network management method.'
+            ],
+            'remediation': [
+              'If NetworkManager is required, restore the service to the expected state.',
+              'Investigate and resolve any NetworkManager startup or configuration errors.',
+              'Validate network connectivity after remediation.'
+            ],
+            'recommendation': 'Investigate why NetworkManager is inactive and confirm whether this is expected for the server.'
+          }
+        ]
+      }}
+  when:
+    - hc_network_data.networkmanager.state != 'active'
+
+
+# =========================================================
+# DEFAULT ROUTE
+# =========================================================
+
+- name: Assess default route
+  ansible.builtin.set_fact:
+    hc_network_findings: >-
+      {{
+        hc_network_findings +
+        [
+          {
+            'id': 'default_route_present',
+            'category': 'Network',
+            'severity': 'OK',
+            'message': 'A default network route is configured.',
+            'evidence': hc_network_data.default_route.raw,
+            'impact': 'A default route is available for traffic destined outside the directly connected networks.',
+            'diagnostic_commands': [],
+            'root_cause_checks': [],
+            'remediation': [],
+            'recommendation': 'No immediate action required. Continue routine monitoring.'
+          }
+        ]
+      }}
+  when:
+    - hc_network_data.default_route.raw | length > 0
+
+
+- name: Assess missing default route
+  ansible.builtin.set_fact:
+    hc_network_findings: >-
+      {{
+        hc_network_findings +
+        [
+          {
+            'id': 'default_route_missing',
+            'category': 'Network',
+            'severity': 'CRITICAL',
+            'message': 'No default network route was detected.',
+            'evidence': hc_network_data.routes.raw,
+            'impact': 'The server may be unable to communicate with networks outside its directly connected networks. Application connectivity and external services may be affected.',
+            'diagnostic_commands': [
+              'ip route',
+              'ip route show default',
+              'ip addr',
+              'nmcli connection show',
+              'nmcli device status'
+            ],
+            'root_cause_checks': [
+              'Verify that the expected default gateway is configured.',
+              'Check the NetworkManager connection profile.',
+              'Verify the server interface has the expected IP configuration.',
+              'Check whether the default route was removed or failed to install after a network change.'
+            ],
+            'remediation': [
+              'Restore the approved default gateway configuration.',
+              'Correct the NetworkManager connection profile if required.',
+              'Reload or reactivate the affected network connection using the approved change procedure.',
+              'Validate routing and application connectivity after remediation.'
+            ],
+            'recommendation': 'Investigate the missing default route immediately and verify the approved gateway and NetworkManager configuration.'
+          }
+        ]
+      }}
+  when:
+    - hc_network_data.default_route.raw | length == 0
+
+
+# =========================================================
+# DNS CONFIGURATION
+# =========================================================
+
+- name: Assess DNS configuration
+  ansible.builtin.set_fact:
+    hc_network_findings: >-
+      {{
+        hc_network_findings +
+        [
+          {
+            'id': 'dns_configuration_present',
+            'category': 'Network',
+            'severity': 'OK',
+            'message': 'DNS resolver configuration is present.',
+            'evidence': hc_network_data.dns.raw,
+            'impact': 'The server has DNS resolver configuration available.',
+            'diagnostic_commands': [],
+            'root_cause_checks': [],
+            'remediation': [],
+            'recommendation': 'No immediate action required. Continue routine monitoring.'
+          }
+        ]
+      }}
+  when:
+    - hc_network_data.dns.raw | length > 0
+
+
+- name: Assess missing DNS configuration
+  ansible.builtin.set_fact:
+    hc_network_findings: >-
+      {{
+        hc_network_findings +
+        [
+          {
+            'id': 'dns_configuration_missing',
+            'category': 'Network',
+            'severity': 'WARNING',
+            'message': 'No DNS resolver configuration was detected.',
+            'evidence': 'No usable DNS configuration was collected from /etc/resolv.conf.',
+            'impact': 'Applications and system services that depend on hostname resolution may fail or experience connectivity problems.',
+            'diagnostic_commands': [
+              'cat /etc/resolv.conf',
+              'nmcli device show',
+              'resolvectl status 2>/dev/null || true'
+            ],
+            'root_cause_checks': [
+              'Check whether /etc/resolv.conf contains valid nameserver entries.',
+              'Verify DNS settings in the NetworkManager connection profile.',
+              'Check whether /etc/resolv.conf is managed by NetworkManager or another resolver service.',
+              'Verify connectivity to the configured DNS servers.'
+            ],
+            'remediation': [
+              'Configure the approved DNS servers.',
+              'Correct the NetworkManager DNS configuration if required.',
+              'Ensure /etc/resolv.conf is correctly managed.',
+              'Validate hostname resolution after remediation.'
+            ],
+            'recommendation': 'Verify the approved DNS configuration and confirm that the server can resolve required internal and external hostnames.'
+          }
+        ]
+      }}
+  when:
+    - hc_network_data.dns.raw | length == 0
+
+
+# =========================================================
+# NETWORK INTERFACE STATUS
+# =========================================================
+
+- name: Assess configured network interfaces
+  ansible.builtin.set_fact:
+    hc_network_findings: >-
+      {{
+        hc_network_findings +
+        [
+          {
+            'id': 'network_interface_configuration',
+            'category': 'Network',
+            'severity': 'OK',
+            'message': 'Network interface configuration was successfully collected.',
+            'evidence': hc_network_data.interfaces.raw,
+            'impact': 'Network interface information is available for assessment.',
+            'diagnostic_commands': [],
+            'root_cause_checks': [],
+            'remediation': [],
+            'recommendation': 'No immediate action required. Continue routine monitoring.'
+          }
+        ]
+      }}
+  when:
+    - hc_network_data.interfaces.raw | length > 0
+
+
+- name: Assess missing network interface information
+  ansible.builtin.set_fact:
+    hc_network_findings: >-
+      {{
+        hc_network_findings +
+        [
+          {
+            'id': 'network_interface_information_missing',
+            'category': 'Network',
+            'severity': 'CRITICAL',
+            'message': 'No network interface information was collected.',
+            'evidence': 'ip -br addr returned no usable output.',
+            'impact': 'The health check cannot reliably determine the server network interface state. Network connectivity may also be unavailable.',
+            'diagnostic_commands': [
+              'ip -br addr',
+              'ip link',
+              'ip addr',
+              'nmcli device status'
+            ],
+            'root_cause_checks': [
+              'Verify that the iproute package and ip command are available.',
+              'Check whether network interfaces are visible to the operating system.',
+              'Check NetworkManager device state.',
+              'Investigate possible operating system or network stack issues.'
+            ],
+            'remediation': [
+              'Restore the required network interface configuration.',
+              'Resolve any NetworkManager or operating system networking issue.',
+              'Validate interface availability and connectivity after remediation.'
+            ],
+            'recommendation': 'Investigate the missing interface information immediately because reliable network health assessment is not possible.'
+          }
+        ]
+      }}
+  when:
+    - hc_network_data.interfaces.raw | length == 0
+
+
+# =========================================================
+# NETWORK INTERFACE ERROR / DROP ASSESSMENT
+# =========================================================
+
+- name: Initialize network interface statistics findings
+  ansible.builtin.set_fact:
+    hc_network_interface_findings: []
+
+
+- name: Assess network interface statistics
+  ansible.builtin.set_fact:
+    hc_network_interface_findings: >-
+      {{
+        hc_network_interface_findings +
+        [
+          {
+            'id': 'network_interface_statistics_' ~ item.interface,
+            'category': 'Network',
+            'severity':
+              'WARNING'
+              if (
+                (item.rx_errors | int) > 0 or
+                (item.rx_dropped | int) > 0 or
+                (item.tx_errors | int) > 0 or
+                (item.tx_dropped | int) > 0
+              )
+              else 'OK',
+
+            'message':
+              'Network interface ' ~ item.interface ~
+              ' has non-zero RX/TX error or drop counters. Further investigation is recommended.'
+              if (
+                (item.rx_errors | int) > 0 or
+                (item.rx_dropped | int) > 0 or
+                (item.tx_errors | int) > 0 or
+                (item.tx_dropped | int) > 0
+              )
+              else
+              'Network interface ' ~ item.interface ~
+              ' has no RX/TX errors or packet drops.',
+
+            'evidence':
+              'RX errors=' ~ (item.rx_errors | string) ~
+              ', RX drops=' ~ (item.rx_dropped | string) ~
+              ', TX errors=' ~ (item.tx_errors | string) ~
+              ', TX drops=' ~ (item.tx_dropped | string),
+
+            'impact':
+              'Non-zero interface error or drop counters may indicate packet loss, NIC problems, driver issues, link problems, congestion, or switch-side network issues.'
+              if (
+                (item.rx_errors | int) > 0 or
+                (item.rx_dropped | int) > 0 or
+                (item.tx_errors | int) > 0 or
+                (item.tx_dropped | int) > 0
+              )
+              else
+              'No interface-level packet error or drop condition was detected.',
+
+            'diagnostic_commands':
+              [
+                'ip -s link show ' ~ item.interface,
+                'ethtool ' ~ item.interface,
+                'ethtool -S ' ~ item.interface,
+                'nmcli device show ' ~ item.interface
+              ]
+              if (
+                (item.rx_errors | int) > 0 or
+                (item.rx_dropped | int) > 0 or
+                (item.tx_errors | int) > 0 or
+                (item.tx_dropped | int) > 0
+              )
+              else [],
+
+            'root_cause_checks':
+              [
+                'Check whether the counters are increasing over time.',
+                'Check interface link state, speed, and duplex settings.',
+                'Review NIC driver and hardware statistics.',
+                'Check for physical link or cabling problems where applicable.',
+                'Check switch-side interface errors, drops, or port flapping.',
+                'Check whether the issue is related to network congestion or buffer exhaustion.'
+              ]
+              if (
+                (item.rx_errors | int) > 0 or
+                (item.rx_dropped | int) > 0 or
+                (item.tx_errors | int) > 0 or
+                (item.tx_dropped | int) > 0
+              )
+              else [],
+
+            'remediation':
+              [
+                'Investigate the interface and confirm whether the counters are actively increasing.',
+                'Correct link, driver, NIC, or network configuration issues where identified.',
+                'Coordinate with the network team to validate the connected switch port.',
+                'Replace or repair faulty hardware if a physical NIC or link problem is confirmed.'
+              ]
+              if (
+                (item.rx_errors | int) > 0 or
+                (item.rx_dropped | int) > 0 or
+                (item.tx_errors | int) > 0 or
+                (item.tx_dropped | int) > 0
+              )
+              else [],
+
+            'recommendation':
+              'Investigate the interface counters and determine whether the errors or drops are actively increasing. Validate the NIC, driver, link, and switch-side port before taking corrective action.'
+              if (
+                (item.rx_errors | int) > 0 or
+                (item.rx_dropped | int) > 0 or
+                (item.tx_errors | int) > 0 or
+                (item.tx_dropped | int) > 0
+              )
+              else
+              'No immediate action required. Continue routine monitoring.'
+          }
+        ]
+      }}
+  loop: "{{ hc_network_data.interfaces.statistics | default([]) }}"
+
+
+- name: Add interface statistics findings to network findings
+  ansible.builtin.set_fact:
+    hc_network_findings: >-
+      {{
+        hc_network_findings +
+        hc_network_interface_findings
+      }}
+
+
+- name: Assess missing network interface statistics
+  ansible.builtin.set_fact:
+    hc_network_findings: >-
+      {{
+        hc_network_findings +
+        [
+          {
+            'id': 'network_interface_statistics_missing',
+            'category': 'Network',
+            'severity': 'WARNING',
+            'message': 'Network interface statistics could not be collected.',
+            'evidence': 'No structured interface statistics were available.',
+            'impact': 'Interface-level error and packet-drop conditions cannot be reliably assessed.',
+            'diagnostic_commands': [
+              'ls -l /sys/class/net/',
+              'ls -l /sys/class/net/<interface>/statistics/',
+              'ip -s link'
+            ],
+            'root_cause_checks': [
+              'Verify that network interfaces expose statistics through sysfs.',
+              'Check whether /sys is mounted correctly.',
+              'Verify that the expected network interfaces exist.',
+              'Check whether the statistics files are readable.'
+            ],
+            'remediation': [
+              'Restore access to the interface statistics information.',
+              'Investigate any sysfs or network interface issue preventing statistics collection.',
+              'Re-run the health check after correcting the collection problem.'
+            ],
+            'recommendation': 'Investigate why interface statistics were unavailable because packet errors and drops cannot be reliably assessed.'
+          }
+        ]
+      }}
+  when:
+    - hc_network_data.interfaces.statistics | default([]) | length == 0
+
+
+# =========================================================
+# NETWORK HEALTH SUMMARY
+# =========================================================
+
+- name: Calculate network health summary
+  ansible.builtin.set_fact:
+    hc_network_critical_count: >-
+      {{
+        (
+          hc_network_findings
+          | selectattr('severity', 'equalto', 'CRITICAL')
+          | list
+          | length
+        ) | int
+      }}
+
+    hc_network_warning_count: >-
+      {{
+        (
+          hc_network_findings
+          | selectattr('severity', 'equalto', 'WARNING')
+          | list
+          | length
+        ) | int
+      }}
+
+    hc_network_info_count: >-
+      {{
+        (
+          hc_network_findings
+          | selectattr('severity', 'equalto', 'INFO')
+          | list
+          | length
+        ) | int
+      }}
+
+    hc_network_ok_count: >-
+      {{
+        (
+          hc_network_findings
+          | selectattr('severity', 'equalto', 'OK')
+          | list
+          | length
+        ) | int
+      }}
+
+
+- name: Determine network health status
+  ansible.builtin.set_fact:
+    hc_network_status: >-
+      {{
+        'CRITICAL'
+        if (hc_network_critical_count | int) > 0
+        else
+        'WARNING'
+        if (hc_network_warning_count | int) > 0
+        else
+        'OK'
+      }}
+
+
+# =========================================================
+# DISPLAY NETWORK ASSESSMENT
+# =========================================================
+
+- name: Display network health findings
+  ansible.builtin.debug:
+    var: hc_network_findings
+
+
+- name: Display network health summary
+  ansible.builtin.debug:
+    msg:
+      - "=================================================="
+      - "NETWORK HEALTH ASSESSMENT"
+      - "=================================================="
+      - "Network Health: {{ hc_network_status }}"
+      - "CRITICAL Findings: {{ hc_network_critical_count }}"
+      - "WARNING Findings: {{ hc_network_warning_count }}"
+      - "INFO Findings: {{ hc_network_info_count }}"
+      - "OK Findings: {{ hc_network_ok_count }}"
+      - "=================================================="

@@ -1,0 +1,16 @@
+---
+- name: Collect system uptime
+  ansible.builtin.command:
+    cmd: uptime -p
+  register: uptime_result
+  changed_when: false
+
+- name: Collect uptime in seconds
+  ansible.builtin.command:
+    cmd: cat /proc/uptime
+  register: uptime_seconds_result
+  changed_when: false
+
+- name: Calculate uptime in days
+  ansible.builtin.set_fact:
+    uptime_days: "{{ ((uptime_seconds_result.stdout.split()[0] | float) / 86400) | round(1) }}"
